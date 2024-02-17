@@ -13,7 +13,7 @@ BirdNET-Pi2Go is a data migration tool designed to facilitate the conversion of 
 
 ## Requirements
 
-Go programming language environment for building the tool.
+Go 1.21 or newer programming language environment for building the tool.
 Access to the file system containing BirdNET-Pi and BirdNET-Go data.
 
 ## Usage
