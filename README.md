@@ -32,6 +32,8 @@ go build
 
 After building, you can run BirdNET-Pi2Go with various flags to customize the migration process:
 
+Target database should be a non-existing database, sqlite database will be created during migration.
+
 ```bash
 ./birdnet-pi2go -source-db <path_to_birdnet_pi_db> -target-db <path_to_birdnet_go_db> -source-dir <path_to_birdnet_pi_audio_files> -target-dir <path_to_birdnet_go_audio_files> -operation <copy|move> -skip-audio-transfer <true|false>
 ```
