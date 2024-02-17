@@ -40,8 +40,8 @@ After building, you can run BirdNET-Pi2Go with various flags to customize the mi
 
 - source-db: Path to the BirdNET-Pi SQLite database.
 - target-db: Path to the BirdNET-Go SQLite database.
-- source-dir: Directory path for BirdNET-Pi audio files.
-- target-dir: Directory path for BirdNET-Go audio files.
+- source-dir: Path to BirdNET-Pi BirdSongs directory
+- target-dir: Path to BirdNET-Go clips directory
 - operation: Operation to perform on audio files (copy or move).
 - skip-audio-transfer: Skip transferring audio files and only perform database migration (true/false).
 
