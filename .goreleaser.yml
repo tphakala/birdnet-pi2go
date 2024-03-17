@@ -3,18 +3,57 @@ before:
   hooks:
     - go mod tidy
     - go generate ./...
+
+# Define builds for Linux and Windows
 builds:
-- env:
-  - CGO_ENABLED=0
-  goos:
-    - linux
-  goarch:
-    - amd64
-    - arm64
+  - binary: birdnet-pi2go
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+    flags:
+      - -trimpath
+    goos:
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    goarm:
+      - '7'
+    ignore:
+    - goos: windows
+      goarch: arm64
+
+# Package the Linux builds into .deb
+nfpms:
+  - id: default
+    package_name: birdnet-pi2go
+
+    vendor: "Tomi P. Hakala"
+    homepage: "https://github.com/tphakala/birdnet-pi2go"
+    maintainer: "Tomi P. Hakala <tphakala@users.noreply.github.com>"
+    description: "BirdNET-Pi2Go is a data migration tool designed to facilitate the conversion of BirdNET-Pi database contents and audio files to the BirdNET-Go data model."
+    license: "MIT"
+
+    formats:
+      - deb
+
+    bindir: "/usr/local/bin"    
+
+# Archive configuration for both Linux and Windows
 archives:
-- format: tar.gz
-  name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+  - id: birdnet-pi2go
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+
+# Include checksums for all artifacts
 checksum:
   name_template: 'checksums.txt'
+
+# Configuration for snapshot releases
 snapshot:
   name_template: "{{ .Tag }}-next"

@@ -8,7 +8,7 @@ on:
 jobs:
   release:
     name: Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
     - name: Check out code
       uses: actions/checkout@v4
@@ -18,15 +18,6 @@ jobs:
       with:
         go-version: 1.22
         check-latest: true
-
-    - name: Clean up dist directory
-      run: rm -rf dist/
-
-    - name: Install GoReleaser
-      uses: goreleaser/goreleaser-action@v5
-      with:
-        version: latest
-        args: release --clean --snapshot
 
     - name: Run GoReleaser
       uses: goreleaser/goreleaser-action@v5
