@@ -79,11 +79,42 @@ func convertAndTransferData(sourceDBPath, targetDBPath, sourceFilesDir, targetFi
 
 // initializeAndMigrateTargetDB prepares the target database for data insertion.
 func initializeAndMigrateTargetDB(targetDBPath string, newLogger logger.Interface) *gorm.DB {
-	targetDB, err := gorm.Open(sqlite.Open(targetDBPath+"?_pragma=journal_mode(WAL)"), &gorm.Config{Logger: newLogger})
+	targetDB, err := gorm.Open(sqlite.Open(targetDBPath), &gorm.Config{Logger: newLogger})
 	if err != nil {
 		log.Fatalf("target db open: %v", err)
 	}
 
+	// Enable foreign key constraint enforcement for SQLite
+	if err := targetDB.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
+		log.Printf("failed to enable foreign key support in SQLite: %v", err)
+		return nil
+	}
+
+	// Set SQLite to use MEMORY journal mode, reduces sdcard wear and improves performance
+	if err := targetDB.Exec("PRAGMA journal_mode = MEMORY").Error; err != nil {
+		log.Printf("failed to enable MEMORY journal mode in SQLite: %v", err)
+		return nil
+	}
+
+	// Set SQLite to use NORMAL synchronous mode
+	if err := targetDB.Exec("PRAGMA synchronous = OFF").Error; err != nil {
+		log.Printf("failed to set synchronous mode in SQLite: %v", err)
+		return nil
+	}
+
+	// Set SQLIte to use MEMORY temp store mode
+	if err := targetDB.Exec("PRAGMA temp_store = MEMORY").Error; err != nil {
+		log.Printf("failed to set temp store mode in SQLite: %v", err)
+		return nil
+	}
+
+	// Increase cache size
+	if err := targetDB.Exec("PRAGMA cache_size = -128000").Error; err != nil {
+		log.Printf("failed to set cache size in SQLite: %v", err)
+		return nil
+	}
+
+	// Perform auto-migration to create the table if it does not exist.
 	if err := targetDB.AutoMigrate(&Note{}); err != nil {
 		log.Fatalf("automigrate: %v", err)
 	}
