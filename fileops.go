@@ -127,21 +127,3 @@ func moveFile(src, dst string) error {
 	// Attempt to rename (move) the file directly.
 	return os.Rename(src, dst)
 }
-
-// generateTargetFileNameAndPath generates a new file name based on the naming convention
-// and constructs a relative path for use as ClipName and for file operations.
-func generateTargetFileNameAndPath(date, commonName string, confidence float64, originalFileName, targetBaseDir string) (string, string) {
-	// Generate the new file name based on the birdnet-go naming convention.
-	confidencePercentage := fmt.Sprintf("%dp", int(confidence*100))
-	newFileName := fmt.Sprintf("%s_%s_%s%s", commonName, confidencePercentage, date, filepath.Ext(originalFileName))
-
-	// Construct the target file path including the 'clips/' directory.
-	targetFilePath := filepath.Join(targetBaseDir, newFileName)
-
-	// Assuming the targetBaseDir includes the 'clips/' part, otherwise adjust as needed.
-	// Extract the part of the targetFilePath that should be stored in the database.
-	clipName := strings.TrimPrefix(targetFilePath, targetBaseDir)
-	clipName = strings.TrimPrefix(clipName, "/") // Ensure no leading slash.
-
-	return newFileName, clipName
-}

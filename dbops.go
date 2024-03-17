@@ -181,7 +181,7 @@ func fetchBatch(sourceDB *gorm.DB, offset, batchSize int, whereClause string, pa
 // inserts it into the target database, and optionally handles file transfer
 // if audio transfer is not skipped.
 func processDetection(targetDB *gorm.DB, detection Detection, sourceFilesDir, targetFilesDir string, operation FileOperationType, skipAudioTransfer bool) {
-	note := convertDetectionToNote(&detection, targetFilesDir)
+	note := convertDetectionToNote(&detection)
 	if err := targetDB.Create(&note).Error; err != nil {
 		log.Printf("Error inserting note: %v", err)
 	}
@@ -193,7 +193,7 @@ func processDetection(targetDB *gorm.DB, detection Detection, sourceFilesDir, ta
 
 // convertDetectionToNote converts a Detection record into a Note record,
 // preparing it for insertion into the target database.
-func convertDetectionToNote(detection *Detection, targetFilesDir string) Note {
+func convertDetectionToNote(detection *Detection) Note {
 	// Attempt to parse the date in RFC3339 format for consistency.
 	parsedDate, err := time.Parse(time.RFC3339, detection.Date)
 	if err != nil {
