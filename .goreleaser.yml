@@ -1,0 +1,20 @@
+# .goreleaser.yml
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+builds:
+- env:
+  - CGO_ENABLED=0
+  goos:
+    - linux
+  goarch:
+    - amd64
+    - arm64
+archives:
+- format: tar.gz
+  name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  name_template: "{{ .Tag }}-next"
