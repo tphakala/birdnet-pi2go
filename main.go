@@ -57,32 +57,36 @@ func main() {
 
 	switch operationFlag {
 	case "move":
-		if sourceFilesDir == "" {
-			log.Fatal("Source directory is required for move operation.")
-		}
-		// Confirm that the user has backed up their data before proceeding with the move operation.
-		fmt.Print("Have you backed up your data and wish to proceed with the move operation? (yes/no): ")
-		reader := bufio.NewReader(os.Stdin)
-		response, err := reader.ReadString('\n')
-		if err != nil {
-			log.Fatal("Failed to read response:", err)
-		}
-		if strings.TrimSpace(strings.ToLower(response)) != "yes" {
-			fmt.Println("Operation aborted by the user. Ensure data is backed up before attempting to move files.")
-			os.Exit(1)
+		if !skipAudioTransfer {
+			if sourceFilesDir == "" {
+				log.Fatal("Source directory is required for move operation.")
+			}
+			// Confirm that the user has backed up their data before proceeding with the move operation.
+			fmt.Print("Have you backed up your data and wish to proceed with the move operation? (yes/no): ")
+			reader := bufio.NewReader(os.Stdin)
+			response, err := reader.ReadString('\n')
+			if err != nil {
+				log.Fatal("Failed to read response:", err)
+			}
+			if strings.TrimSpace(strings.ToLower(response)) != "yes" {
+				fmt.Println("Operation aborted by the user. Ensure data is backed up before attempting to move files.")
+				os.Exit(1)
+			}
 		}
 		operation = MoveFile
 	case "copy":
-		if sourceFilesDir == "" {
-			log.Fatal("Source directory is required for move operation.")
-		}
-		// Check disk space before copying, if required.
-		enoughSpace, err := checkDiskSpace(sourceFilesDir, targetFilesDir)
-		if err != nil {
-			log.Fatalf("Failed to check disk space: %v", err)
-		}
-		if !enoughSpace {
-			log.Fatal("Not enough space on target volume to perform copy operation.")
+		if !skipAudioTransfer {
+			if sourceFilesDir == "" {
+				log.Fatal("Source directory is required for copy operation.")
+			}
+			// Check disk space before copying, if required.
+			enoughSpace, err := checkDiskSpace(sourceFilesDir, targetFilesDir)
+			if err != nil {
+				log.Fatalf("Failed to check disk space: %v", err)
+			}
+			if !enoughSpace {
+				log.Fatal("Not enough space on target volume to perform copy operation.")
+			}
 		}
 		operation = CopyFile
 	case "merge":
