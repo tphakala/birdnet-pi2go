@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 )
 
 // FileOperationType defines the type of operation to perform on the audio files.
@@ -26,7 +25,7 @@ func main() {
 		targetDBPath      string = "birdnet.db" // BirdNET-Go database.
 		sourceFilesDir    string                // BirdNET-Pi audio files directory.
 		targetFilesDir    string = "clips"      // BirdNET-Go audio files directory.
-		operationFlag     string                // copy or move audio clips
+		operationFlag     string = "copy"       // copy or move audio clips
 		skipAudioTransfer bool   = false        // skip copying audio files
 	)
 
@@ -124,12 +123,10 @@ func checkDiskSpace(sourceDir, targetDir string) (bool, error) {
 		return false, err
 	}
 
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(targetDir, &stat); err != nil {
+	freeSpace, err := getFreeSpace(targetDir)
+	if err != nil {
 		return false, err
 	}
 
-	// Calculate free space available in the target directory.
-	freeSpace := stat.Bavail * uint64(stat.Bsize)
-	return uint64(sourceSize) <= freeSpace, nil // Return whether there's enough space.
+	return uint64(sourceSize) <= freeSpace, nil
 }
