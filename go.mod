@@ -1,6 +1,6 @@
 module github.com/tphakala/birdnet-pi2go
 
-go 1.21.6
+go 1.22.1
 
 require (
 	github.com/glebarez/sqlite v1.11.0
