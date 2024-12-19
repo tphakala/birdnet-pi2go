@@ -34,8 +34,11 @@ func main() {
 	flag.StringVar(&targetDBPath, "target-db", targetDBPath, "Path to the BirdNET-Go SQLite database.")
 	flag.StringVar(&sourceFilesDir, "source-dir", "", "Directory path for BirdNET-Pi BirdSongs.")
 	flag.StringVar(&targetFilesDir, "target-dir", targetFilesDir, "Directory path for BirdNET-Go clips.")
-	flag.StringVar(&operationFlag, "operation", "", "Operation to perform on audio files: 'copy' or 'move'.")
-	flag.BoolVar(&skipAudioTransfer, "skip-audio-transfer", skipAudioTransfer, "Skip transferring audio files and only perform database migration. true/false.")
+	// Split the long flag definition into two lines
+	flag.StringVar(&operationFlag, "operation", "",
+		"Operation to perform on audio files: 'copy' or 'move'.")
+	flag.BoolVar(&skipAudioTransfer, "skip-audio-transfer", skipAudioTransfer,
+		"Skip transferring audio files and only perform database migration. true/false.")
 
 	// Parse the provided flags.
 	flag.Parse()
@@ -43,7 +46,8 @@ func main() {
 	// Ensure database paths are provided; other parameters are optional.
 	if operationFlag == "" {
 		fmt.Println("birdnet-pi2go: Convert birdnet-pi data to birdnet-go.")
-		fmt.Println("This tool is provided 'AS IS', without warranty of any kind. Please ensure you have backed up your data before using this tool.")
+		fmt.Println("This tool is provided 'AS IS', without warranty of any kind.")
+		fmt.Println("Please ensure you have backed up your data before using this tool.")
 		fmt.Println("Usage:")
 		flag.PrintDefaults() // Print default help messages.
 		os.Exit(1)           // Exit after displaying help message.
@@ -67,24 +71,31 @@ func main() {
 			if err != nil {
 				log.Fatal("Failed to read response:", err)
 			}
+
 			if strings.TrimSpace(strings.ToLower(response)) != "yes" {
 				fmt.Println("Operation aborted by the user. Ensure data is backed up before attempting to move files.")
 				os.Exit(1)
 			}
 		}
 		operation = MoveFile
+	// Inside the "copy" case in main.go
 	case "copy":
 		if !skipAudioTransfer {
 			if sourceFilesDir == "" {
 				log.Fatal("Source directory is required for copy operation.")
 			}
-			// Check disk space before copying, if required.
+
+			if targetFilesDir == "" {
+				log.Fatal("Target directory is required for copy operation.")
+			}
+			// Split the long line into two
 			enoughSpace, err := checkDiskSpace(sourceFilesDir, targetFilesDir)
 			if err != nil {
-				log.Fatalf("Failed to check disk space: %v", err)
+				log.Fatal("Failed to check disk space:", err)
 			}
+
 			if !enoughSpace {
-				log.Fatal("Not enough space on target volume to perform copy operation.")
+				log.Fatal("Insufficient space on target volume")
 			}
 		}
 		operation = CopyFile
@@ -108,6 +119,7 @@ func calculateDirSize(dirPath string) (int64, error) {
 		if err != nil {
 			return err
 		}
+
 		if !info.IsDir() {
 			totalSize += info.Size() // Add file size if it's not a directory.
 		}

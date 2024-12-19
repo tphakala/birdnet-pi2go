@@ -17,6 +17,7 @@ import (
 func handleFileTransfer(detection Detection, sourceFilesDir, targetFilesDir string, operation FileOperationType) {
 	// Custom layout to parse the detection date and time.
 	const customLayout = "2006-01-02T15:04:05"
+
 	dateTime := detection.Date + "T" + detection.Time
 
 	parsedDate, err := time.Parse(customLayout, dateTime)
@@ -70,6 +71,7 @@ func handleFileTransfer(detection Detection, sourceFilesDir, targetFilesDir stri
 func GenerateClipName(detection Detection) string {
 	// Custom layout to parse the detection date and time.
 	const customLayout = "2006-01-02T15:04:05"
+
 	dateTime := detection.Date + "T" + detection.Time
 
 	parsedDate, err := time.Parse(customLayout, dateTime)

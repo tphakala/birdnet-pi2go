@@ -87,18 +87,21 @@ func initializeAndMigrateTargetDB(targetDBPath string, newLogger logger.Interfac
 	// Enable foreign key constraint enforcement for SQLite
 	if err := targetDB.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
 		log.Printf("failed to enable foreign key support in SQLite: %v", err)
+
 		return nil
 	}
 
 	// Set SQLite to use MEMORY journal mode, reduces sdcard wear and improves performance
 	if err := targetDB.Exec("PRAGMA journal_mode = MEMORY").Error; err != nil {
 		log.Printf("failed to enable MEMORY journal mode in SQLite: %v", err)
+
 		return nil
 	}
 
 	// Set SQLite to use NORMAL synchronous mode
 	if err := targetDB.Exec("PRAGMA synchronous = OFF").Error; err != nil {
 		log.Printf("failed to set synchronous mode in SQLite: %v", err)
+
 		return nil
 	}
 
@@ -139,9 +142,11 @@ func createGormLogger() logger.Interface {
 func getTotalRecordCount(sourceDB *gorm.DB, whereClause string, params ...interface{}) int {
 	var totalCount int64
 	query := sourceDB.Model(&Detection{})
+
 	if whereClause != "" {
 		query = query.Where(whereClause, params...)
 	}
+
 	if err := query.Count(&totalCount).Error; err != nil {
 		log.Fatalf("Error counting source records: %v", err)
 	}
@@ -157,6 +162,7 @@ func processRecordsInBatches(sourceDB *gorm.DB, targetDB *gorm.DB, totalCount in
 	for offset := 0; offset < totalCount; offset += batchSize {
 		batchDetections := fetchBatch(sourceDB, offset, batchSize, whereClause, params)
 		fmt.Printf("Processing batch %d-%d of %d\n", offset+1, offset+len(batchDetections), totalCount)
+
 		for _, detection := range batchDetections {
 			processDetection(targetDB, detection, sourceFilesDir, targetFilesDir, operation, skipAudioTransfer)
 		}
@@ -167,13 +173,17 @@ func processRecordsInBatches(sourceDB *gorm.DB, targetDB *gorm.DB, totalCount in
 // based on the provided offset and batchSize.
 func fetchBatch(sourceDB *gorm.DB, offset, batchSize int, whereClause string, params []interface{}) []Detection {
 	var detections []Detection
+
 	query := sourceDB.Model(&Detection{}).Order("date ASC, time ASC").Offset(offset).Limit(batchSize)
+
 	if whereClause != "" {
 		query = query.Where(whereClause, params...)
 	}
+
 	if err := query.Find(&detections).Error; err != nil {
 		log.Fatalf("Error fetching batch: %v", err)
 	}
+
 	return detections
 }
 
@@ -223,6 +233,7 @@ func convertDetectionToNote(detection *Detection) Note {
 func findLastEntryInTargetDB(targetDB *gorm.DB) (*Note, error) {
 	var lastNote Note
 	result := targetDB.Order("date DESC, time DESC").First(&lastNote)
+
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			// The database is empty. This is not an error condition for this function.
@@ -231,6 +242,7 @@ func findLastEntryInTargetDB(targetDB *gorm.DB) (*Note, error) {
 		// For other types of errors, return the error as is.
 		return nil, result.Error
 	}
+
 	return &lastNote, nil
 }
 
@@ -242,6 +254,7 @@ func formulateQuery(lastNote *Note) (string, []interface{}) {
 		params := []interface{}{lastNote.Date, lastNote.Date, lastNote.Time}
 		return whereClause, params
 	}
+
 	return "", nil
 }
 
@@ -290,6 +303,7 @@ func MergeDatabases(sourceDBPath, targetDBPath string) error {
 
 			if err := targetDB.Create(&newNote).Error; err != nil {
 				log.Printf("Error inserting note: %v", err)
+
 				continue // Adjust error handling as needed.
 			}
 		}
