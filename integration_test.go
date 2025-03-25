@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"os"
@@ -189,7 +190,7 @@ func verifyFileOperation(t *testing.T, operation FileOperationType, sourceFilePa
 		t.Fatalf("Failed to read target file: %v", err)
 	}
 
-	if string(targetContent) != string(testContent) {
+	if !bytes.Equal(targetContent, testContent) {
 		t.Errorf("File content does not match source content")
 	}
 

@@ -98,7 +98,7 @@ func handleFileTransferWithFS(detection *Detection, sourceFilesDir, targetFilesD
 	targetFilePath := filepath.Join(targetSubDir, newFileName)
 
 	// Ensure target directory exists
-	err = fs.MkdirAll(targetSubDir, 0755)
+	err = fs.MkdirAll(targetSubDir, 0o755)
 	if err != nil {
 		log.Printf("Failed to create subdirectories: %v", err)
 		return
@@ -115,7 +115,7 @@ func handleFileTransferWithFS(detection *Detection, sourceFilesDir, targetFilesD
 		}
 
 		// Write to the target file
-		err = fs.WriteFile(targetFilePath, data, 0644)
+		err = fs.WriteFile(targetFilePath, data, 0o644)
 		if err != nil {
 			log.Printf("Failed to write target file: %v", err)
 			return
@@ -132,7 +132,7 @@ func handleFileTransferWithFS(detection *Detection, sourceFilesDir, targetFilesD
 		}
 
 		// Write to the target file
-		err = fs.WriteFile(targetFilePath, data, 0644)
+		err = fs.WriteFile(targetFilePath, data, 0o644)
 		if err != nil {
 			log.Printf("Failed to write target file: %v", err)
 			return

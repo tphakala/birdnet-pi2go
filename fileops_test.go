@@ -211,7 +211,7 @@ func TestHandleFileTransfer(t *testing.T) {
 				t.Fatalf("Failed to read copied file: %v", err)
 			}
 
-			if string(targetContent) != string(sourceContent) {
+			if !bytes.Equal(targetContent, sourceContent) {
 				t.Errorf("handleFileTransfer() copied content does not match source content")
 			}
 		}
@@ -267,7 +267,7 @@ func TestHandleFileTransfer(t *testing.T) {
 				t.Fatalf("Failed to read moved file: %v", err)
 			}
 
-			if string(targetContent) != string(sourceContent) {
+			if !bytes.Equal(targetContent, sourceContent) {
 				t.Errorf("handleFileTransfer() moved content does not match source content")
 			}
 		}

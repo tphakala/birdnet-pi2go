@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -58,7 +59,7 @@ func TestHandleFileTransferWithMockFS(t *testing.T) {
 			t.Fatalf("Failed to read target file: %v", err)
 		}
 
-		if string(content) != string(sourceContent) {
+		if !bytes.Equal(content, sourceContent) {
 			t.Errorf("Target file content mismatch. Got: %s, Want: %s", content, sourceContent)
 		}
 
@@ -87,7 +88,7 @@ func TestHandleFileTransferWithMockFS(t *testing.T) {
 			t.Fatalf("Failed to read target file after move: %v", err)
 		}
 
-		if string(content) != string(sourceContent) {
+		if !bytes.Equal(content, sourceContent) {
 			t.Errorf("Target file content mismatch after move. Got: %s, Want: %s", content, sourceContent)
 		}
 
@@ -172,7 +173,7 @@ func TestCopyFileWithMockFS(t *testing.T) {
 			t.Fatalf("Failed to read target file: %v", err)
 		}
 
-		if string(targetContent) != string(content) {
+		if !bytes.Equal(targetContent, content) {
 			t.Errorf("Target content = %s, want %s", targetContent, content)
 		}
 	})
@@ -240,7 +241,7 @@ func TestMoveFileWithMockFS(t *testing.T) {
 			t.Fatalf("Failed to read target file: %v", err)
 		}
 
-		if string(targetContent) != string(content) {
+		if !bytes.Equal(targetContent, content) {
 			t.Errorf("Target content = %s, want %s", targetContent, content)
 		}
 	})
