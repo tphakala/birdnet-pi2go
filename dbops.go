@@ -204,11 +204,18 @@ func processDetection(targetDB *gorm.DB, detection *Detection, sourceFilesDir, t
 // convertDetectionToNote converts a Detection record into a Note record,
 // preparing it for insertion into the target database.
 func convertDetectionToNote(detection *Detection) Note {
-	// Attempt to parse the date in RFC3339 format for consistency.
+	// Try parsing the date in both RFC3339 and simple date format
 	parsedDate, err := time.Parse(time.RFC3339, detection.Date)
 	if err != nil {
-		log.Printf("Error parsing date: %v, using original value", err)
-	} else {
+		// If RFC3339 fails, try simple date format
+		parsedDate, err = time.Parse("2006-01-02", detection.Date)
+		if err != nil {
+			log.Printf("Error parsing date: %v, using original value", err)
+		}
+	}
+
+	// Only update the date format if parsing was successful
+	if err == nil {
 		detection.Date = parsedDate.Format("2006-01-02")
 	}
 
