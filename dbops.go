@@ -156,22 +156,22 @@ func getTotalRecordCount(sourceDB *gorm.DB, whereClause string, params ...interf
 
 // processRecordsInBatches processes records from the source database in batches,
 // converting each record to a Note and optionally transferring files.
-func processRecordsInBatches(sourceDB *gorm.DB, targetDB *gorm.DB, totalCount int, sourceFilesDir, targetFilesDir string, operation FileOperationType, skipAudioTransfer bool, whereClause string, params []interface{}) {
+func processRecordsInBatches(sourceDB, targetDB *gorm.DB, totalCount int, sourceFilesDir, targetFilesDir string, operation FileOperationType, skipAudioTransfer bool, whereClause string, params []any) {
 	const batchSize = 1000 // Define the size of each batch
 
 	for offset := 0; offset < totalCount; offset += batchSize {
 		batchDetections := fetchBatch(sourceDB, offset, batchSize, whereClause, params)
 		fmt.Printf("Processing batch %d-%d of %d\n", offset+1, offset+len(batchDetections), totalCount)
 
-		for _, detection := range batchDetections {
-			processDetection(targetDB, detection, sourceFilesDir, targetFilesDir, operation, skipAudioTransfer)
+		for i := range batchDetections {
+			processDetection(targetDB, &batchDetections[i], sourceFilesDir, targetFilesDir, operation, skipAudioTransfer)
 		}
 	}
 }
 
 // fetchBatch retrieves a specific batch of Detection records from the source database,
 // based on the provided offset and batchSize.
-func fetchBatch(sourceDB *gorm.DB, offset, batchSize int, whereClause string, params []interface{}) []Detection {
+func fetchBatch(sourceDB *gorm.DB, offset, batchSize int, whereClause string, params []any) []Detection {
 	var detections []Detection
 
 	query := sourceDB.Model(&Detection{}).Order("date ASC, time ASC").Offset(offset).Limit(batchSize)
@@ -190,8 +190,8 @@ func fetchBatch(sourceDB *gorm.DB, offset, batchSize int, whereClause string, pa
 // processDetection takes a single Detection record, converts it to a Note,
 // inserts it into the target database, and optionally handles file transfer
 // if audio transfer is not skipped.
-func processDetection(targetDB *gorm.DB, detection Detection, sourceFilesDir, targetFilesDir string, operation FileOperationType, skipAudioTransfer bool) {
-	note := convertDetectionToNote(&detection)
+func processDetection(targetDB *gorm.DB, detection *Detection, sourceFilesDir, targetFilesDir string, operation FileOperationType, skipAudioTransfer bool) {
+	note := convertDetectionToNote(detection)
 	if err := targetDB.Create(&note).Error; err != nil {
 		log.Printf("Error inserting note: %v", err)
 	}
@@ -212,7 +212,7 @@ func convertDetectionToNote(detection *Detection) Note {
 		detection.Date = parsedDate.Format("2006-01-02")
 	}
 
-	clipName := GenerateClipName(*detection)
+	clipName := GenerateClipName(detection)
 
 	return Note{
 		Date:           detection.Date,
@@ -248,10 +248,10 @@ func findLastEntryInTargetDB(targetDB *gorm.DB) (*Note, error) {
 
 // formulateQuery constructs a SQL WHERE clause and its corresponding parameters
 // based on the most recent Note entry in the target database.
-func formulateQuery(lastNote *Note) (string, []interface{}) {
+func formulateQuery(lastNote *Note) (whereClause string, params []any) {
 	if lastNote != nil {
-		whereClause := "date > ? OR (date = ? AND time > ?)"
-		params := []interface{}{lastNote.Date, lastNote.Date, lastNote.Time}
+		whereClause = "date > ? OR (date = ? AND time > ?)"
+		params = []any{lastNote.Date, lastNote.Date, lastNote.Time}
 		return whereClause, params
 	}
 
@@ -260,14 +260,26 @@ func formulateQuery(lastNote *Note) (string, []interface{}) {
 
 // MergeDatabases merges notes from sourceDB into targetDB.
 func MergeDatabases(sourceDBPath, targetDBPath string) error {
+	// Check if source database file exists
+	if _, err := os.Stat(sourceDBPath); os.IsNotExist(err) {
+		return fmt.Errorf("source database file does not exist: %s", sourceDBPath)
+	}
+
 	// Connect to the source database.
 	sourceDB := initializeAndMigrateTargetDB(sourceDBPath, createGormLogger())
+
+	// Verify we can query the source database (it must be a valid SQLite database with Notes table)
+	var count int64
+	if err := sourceDB.Model(&Note{}).Count(&count).Error; err != nil {
+		return fmt.Errorf("failed to access source database: %w", err)
+	}
+
 	targetDB := initializeAndMigrateTargetDB(targetDBPath, createGormLogger())
 
 	// Determine the total number of notes in the source database.
 	var totalNotes int64
 	if err := sourceDB.Model(&Note{}).Count(&totalNotes).Error; err != nil {
-		return fmt.Errorf("failed to count notes in source database: %v", err)
+		return fmt.Errorf("failed to count notes in source database: %w", err)
 	}
 
 	// Define the batch size.
@@ -279,26 +291,26 @@ func MergeDatabases(sourceDBPath, targetDBPath string) error {
 		// Retrieve a batch of notes from the source database.
 		var notes []Note
 		if err := sourceDB.Limit(batchSize).Offset(int(i * batchSize)).Find(&notes).Error; err != nil {
-			return fmt.Errorf("failed to retrieve batch of notes: %v", err)
+			return fmt.Errorf("failed to retrieve batch of notes: %w", err)
 		}
 
 		// print progres
 		fmt.Printf("Processing batch %d of %d\n", i+1, numBatches)
 
 		// Insert each note in the batch into the target database without the ID field.
-		for _, note := range notes {
+		for i := range notes {
 			newNote := Note{
-				Date:           note.Date,
-				Time:           note.Time,
-				ScientificName: note.ScientificName,
-				CommonName:     note.CommonName,
-				Confidence:     note.Confidence,
-				Latitude:       note.Latitude,
-				Longitude:      note.Longitude,
-				Threshold:      note.Threshold,
-				Sensitivity:    note.Sensitivity,
-				ClipName:       note.ClipName,
-				Verified:       note.Verified,
+				Date:           notes[i].Date,
+				Time:           notes[i].Time,
+				ScientificName: notes[i].ScientificName,
+				CommonName:     notes[i].CommonName,
+				Confidence:     notes[i].Confidence,
+				Latitude:       notes[i].Latitude,
+				Longitude:      notes[i].Longitude,
+				Threshold:      notes[i].Threshold,
+				Sensitivity:    notes[i].Sensitivity,
+				ClipName:       notes[i].ClipName,
+				Verified:       notes[i].Verified,
 			}
 
 			if err := targetDB.Create(&newNote).Error; err != nil {

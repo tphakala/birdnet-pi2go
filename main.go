@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // FileOperationType defines the type of operation to perform on the audio files.
@@ -101,7 +102,10 @@ func main() {
 		operation = CopyFile
 	case "merge":
 		// Merge existing BirdNET-Go database to migrated data.
-		MergeDatabases(sourceDBPath, targetDBPath)
+		err := MergeDatabases(sourceDBPath, targetDBPath)
+		if err != nil {
+			log.Fatal("Failed to merge databases:", err)
+		}
 		return
 	default:
 		log.Fatal("Invalid operation. Use 'copy' or 'move'.") // Handle invalid operation value.
@@ -141,4 +145,14 @@ func checkDiskSpace(sourceDir, targetDir string) (bool, error) {
 	}
 
 	return uint64(sourceSize) <= freeSpace, nil
+}
+
+// getFreeSpace returns the available space in bytes for the given path
+func getFreeSpace(path string) (uint64, error) {
+	var stat syscall.Statfs_t
+	err := syscall.Statfs(path, &stat)
+	if err != nil {
+		return 0, err
+	}
+	return stat.Bavail * uint64(stat.Bsize), nil
 }

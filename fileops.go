@@ -14,7 +14,7 @@ import (
 // handleFileTransfer manages the process of transferring a file from a source to a target directory
 // based on a detection event. It involves renaming the file according to a specified format,
 // creating necessary subdirectories in the target location, and performing the file transfer operation.
-func handleFileTransfer(detection Detection, sourceFilesDir, targetFilesDir string, operation FileOperationType) {
+func handleFileTransfer(detection *Detection, sourceFilesDir, targetFilesDir string, operation FileOperationType) {
 	// Custom layout to parse the detection date and time.
 	const customLayout = "2006-01-02T15:04:05"
 
@@ -68,7 +68,7 @@ func handleFileTransfer(detection Detection, sourceFilesDir, targetFilesDir stri
 	}
 }
 
-func GenerateClipName(detection Detection) string {
+func GenerateClipName(detection *Detection) string {
 	// Custom layout to parse the detection date and time.
 	const customLayout = "2006-01-02T15:04:05"
 
@@ -84,7 +84,10 @@ func GenerateClipName(detection Detection) string {
 	formattedDateTime := parsedDate.Format("20060102T150405Z")
 
 	// Format the scientific name for the filename: lowercase, spaces to underscores, remove hyphens and colons.
-	sciNameFormatted := strings.ToLower(strings.ReplaceAll(detection.SciName, " ", "_"))
+	sciNameFormatted := strings.ToLower(detection.SciName)
+	sciNameFormatted = strings.ReplaceAll(sciNameFormatted, " ", "_")
+	sciNameFormatted = strings.ReplaceAll(sciNameFormatted, "-", "")
+	sciNameFormatted = strings.ReplaceAll(sciNameFormatted, ":", "")
 
 	// Generate the new filename with the formatted date, time, and confidence level.
 	confidencePercentage := fmt.Sprintf("%dp", int(detection.Confidence*100))
