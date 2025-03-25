@@ -57,9 +57,23 @@ func (Detection) TableName() string {
 func convertAndTransferData(sourceDBPath, targetDBPath, sourceFilesDir, targetFilesDir string, operation FileOperationType, skipAudioTransfer bool) {
 	newLogger := createGormLogger()
 
+	// Check if source database file exists
+	if _, err := os.Stat(sourceDBPath); os.IsNotExist(err) {
+		log.Printf("Source database file does not exist: %s", sourceDBPath)
+		return
+	}
+
 	sourceDB, err := gorm.Open(sqlite.Open(sourceDBPath), &gorm.Config{Logger: newLogger})
 	if err != nil {
 		log.Fatalf("source db open: %v", err)
+	}
+
+	// Check if detections table exists
+	var count int64
+	err = sourceDB.Raw("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='detections'").Count(&count).Error
+	if err != nil || count == 0 {
+		log.Printf("detections table not found in source database: %s", sourceDBPath)
+		return
 	}
 
 	targetDB := initializeAndMigrateTargetDB(targetDBPath, newLogger)
@@ -148,7 +162,8 @@ func getTotalRecordCount(sourceDB *gorm.DB, whereClause string, params ...interf
 	}
 
 	if err := query.Count(&totalCount).Error; err != nil {
-		log.Fatalf("Error counting source records: %v", err)
+		log.Printf("Error counting source records: %v", err)
+		return 0
 	}
 
 	return int(totalCount)
@@ -197,7 +212,7 @@ func processDetection(targetDB *gorm.DB, detection *Detection, sourceFilesDir, t
 	}
 
 	if !skipAudioTransfer {
-		go handleFileTransfer(detection, sourceFilesDir, targetFilesDir, operation)
+		go handleFileTransferWithFS(detection, sourceFilesDir, targetFilesDir, operation, DefaultFS)
 	}
 }
 

@@ -1,63 +1,24 @@
 package main
 
 import (
-	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/mock"
 )
-
-// Define a mock file system to test file operations without actual files
-type MockFileSystem struct {
-	mock.Mock
-}
-
-func (m *MockFileSystem) FileExists(path string) bool {
-	args := m.Called(path)
-	return args.Bool(0)
-}
-
-func (m *MockFileSystem) ReadFile(path string) ([]byte, error) {
-	args := m.Called(path)
-	return args.Get(0).([]byte), args.Error(1)
-}
-
-func (m *MockFileSystem) WriteFile(path string, data []byte, perm os.FileMode) error {
-	args := m.Called(path, data, perm)
-	return args.Error(0)
-}
-
-func (m *MockFileSystem) MkdirAll(path string, perm os.FileMode) error {
-	args := m.Called(path, perm)
-	return args.Error(0)
-}
-
-func (m *MockFileSystem) Remove(path string) error {
-	args := m.Called(path)
-	return args.Error(0)
-}
-
-func (m *MockFileSystem) Rename(oldpath, newpath string) error {
-	args := m.Called(oldpath, newpath)
-	return args.Error(0)
-}
 
 // TestHandleFileTransferWithMocks tests the handleFileTransfer function with mocked filesystem
 func TestHandleFileTransferWithMocks(t *testing.T) {
 	t.Parallel()
 
-	// Setup
-	mockFS := new(MockFileSystem)
-
 	// Test case 1: Successful copy operation
 	t.Run("Successful copy", func(t *testing.T) {
 		t.Parallel()
 
+		// Setup a mock filesystem
+		mockFS := NewMockFS()
+
 		// Test data
-		detection := Detection{
+		detection := &Detection{
 			Date:       "2023-01-15",
 			Time:       "13:45:30",
 			SciName:    "Testus birdus",
@@ -73,68 +34,49 @@ func TestHandleFileTransferWithMocks(t *testing.T) {
 		sourceDirPath := filepath.Join(sourceDir, "Extracted", "By_Date", detection.Date, detection.ComName)
 		sourceFilePath := filepath.Join(sourceDirPath, detection.FileName)
 
+		// Create source file in the mock filesystem
+		mockFS.MkdirAll(filepath.Dir(sourceFilePath), 0o755)
+		mockFS.WriteFile(sourceFilePath, []byte("test content"), 0o644)
+
+		// Execute
+		handleFileTransferWithFS(detection, sourceDir, targetDir, CopyFile, mockFS)
+
 		// Expected target paths
 		parsedDate, _ := time.Parse("2006-01-02T15:04:05", detection.Date+"T"+detection.Time)
 		expectedYear, expectedMonth := parsedDate.Format("2006"), parsedDate.Format("01")
-		subDirPath := filepath.Join(targetDir, expectedYear, expectedMonth)
 		expectedFileName := "testus_birdus_85p_20230115T134530Z.wav"
-		targetFilePath := filepath.Join(subDirPath, expectedFileName)
+		targetFilePath := filepath.Join(targetDir, expectedYear, expectedMonth, expectedFileName)
 
-		// Setup mock expectations
-		mockFS.On("FileExists", sourceFilePath).Return(true)
-		mockFS.On("MkdirAll", subDirPath, os.ModePerm).Return(nil)
-		mockFS.On("ReadFile", sourceFilePath).Return([]byte("test content"), nil)
-		mockFS.On("WriteFile", targetFilePath, []byte("test content"), mock.Anything).Return(nil)
-
-		// Capture original functions and restore after test
-		originalStat := osStat
-		originalMkdirAll := osMkdirAll
-		originalCopyFile := fileCopyFunc
-
-		// Override with mocks
-		osStat = func(path string) (os.FileInfo, error) {
-			if mockFS.FileExists(path) {
-				return nil, nil // Return non-nil FileInfo for existing files
-			}
-			return nil, os.ErrNotExist
+		// Verify the file was copied to the expected location
+		if !mockFS.FileExists(targetFilePath) {
+			t.Errorf("handleFileTransfer() did not copy file to expected location: %s", targetFilePath)
 		}
 
-		osMkdirAll = mockFS.MkdirAll
-
-		fileCopyFunc = func(src, dst string) error {
-			if !mockFS.FileExists(src) {
-				return errors.New("source file does not exist")
-			}
-
-			// Simulate reading from source and writing to destination
-			data, err := mockFS.ReadFile(src)
-			if err != nil {
-				return err
-			}
-
-			return mockFS.WriteFile(dst, data, 0o644)
+		// Verify the source file still exists (copy, not move)
+		if !mockFS.FileExists(sourceFilePath) {
+			t.Errorf("handleFileTransfer() with CopyFile removed the source file")
 		}
 
-		// Restore original functions after test
-		defer func() {
-			osStat = originalStat
-			osMkdirAll = originalMkdirAll
-			fileCopyFunc = originalCopyFile
-		}()
+		// Verify the content of the copied file
+		targetContent, err := mockFS.ReadFile(targetFilePath)
+		if err != nil {
+			t.Fatalf("Failed to read copied file: %v", err)
+		}
 
-		// Execute
-		handleFileTransfer(&detection, sourceDir, targetDir, CopyFile)
-
-		// Verify
-		mockFS.AssertExpectations(t)
+		if string(targetContent) != "test content" {
+			t.Errorf("handleFileTransfer() copied content does not match source content")
+		}
 	})
 
 	// Test case 2: Source file doesn't exist
 	t.Run("Source file doesn't exist", func(t *testing.T) {
 		t.Parallel()
 
+		// Setup a mock filesystem
+		mockFS := NewMockFS()
+
 		// Test data
-		detection := Detection{
+		detection := &Detection{
 			Date:       "2023-01-15",
 			Time:       "13:45:30",
 			SciName:    "Testus birdus",
@@ -146,42 +88,35 @@ func TestHandleFileTransferWithMocks(t *testing.T) {
 		sourceDir := "/source"
 		targetDir := "/target"
 
-		// Source file path
-		sourceDirPath := filepath.Join(sourceDir, "Extracted", "By_Date", detection.Date, detection.ComName)
-		sourceFilePath := filepath.Join(sourceDirPath, detection.FileName)
-
-		// Setup mock expectations
-		mockFS.On("FileExists", sourceFilePath).Return(false)
-
-		// Capture original functions and restore after test
-		originalStat := osStat
-
-		// Override with mocks
-		osStat = func(path string) (os.FileInfo, error) {
-			if mockFS.FileExists(path) {
-				return nil, nil
-			}
-			return nil, os.ErrNotExist
-		}
-
-		// Restore original function after test
-		defer func() {
-			osStat = originalStat
-		}()
+		// No need to create the missing file
 
 		// Execute - this should not panic and simply return without performing any action
-		handleFileTransfer(&detection, sourceDir, targetDir, CopyFile)
+		handleFileTransferWithFS(detection, sourceDir, targetDir, CopyFile, mockFS)
 
-		// Verify
-		mockFS.AssertExpectations(t)
+		// Expected target paths
+		parsedDate, _ := time.Parse("2006-01-02T15:04:05", detection.Date+"T"+detection.Time)
+		expectedYear, expectedMonth := parsedDate.Format("2006"), parsedDate.Format("01")
+		expectedFileName := "testus_birdus_85p_20230115T134530Z.wav"
+		targetFilePath := filepath.Join(targetDir, expectedYear, expectedMonth, expectedFileName)
+
+		// Verify that no file was created
+		if mockFS.FileExists(targetFilePath) {
+			t.Errorf("handleFileTransfer() created a target file when source doesn't exist")
+		}
 	})
 
 	// Test case 3: Error creating target directories
 	t.Run("Error creating target directories", func(t *testing.T) {
 		t.Parallel()
 
+		// Setup a mock filesystem
+		mockFS := NewMockFS()
+
+		// Setup the failure mode
+		mockFS.SetFailMode("MkdirAll", true)
+
 		// Test data
-		detection := Detection{
+		detection := &Detection{
 			Date:       "2023-01-15",
 			Time:       "13:45:30",
 			SciName:    "Testus birdus",
@@ -197,47 +132,22 @@ func TestHandleFileTransferWithMocks(t *testing.T) {
 		sourceDirPath := filepath.Join(sourceDir, "Extracted", "By_Date", detection.Date, detection.ComName)
 		sourceFilePath := filepath.Join(sourceDirPath, detection.FileName)
 
+		// Create source file in the mock filesystem
+		mockFS.MkdirAll(filepath.Dir(sourceFilePath), 0o755)
+		mockFS.WriteFile(sourceFilePath, []byte("test content"), 0o644)
+
 		// Expected target paths
 		parsedDate, _ := time.Parse("2006-01-02T15:04:05", detection.Date+"T"+detection.Time)
 		expectedYear, expectedMonth := parsedDate.Format("2006"), parsedDate.Format("01")
-		subDirPath := filepath.Join(targetDir, expectedYear, expectedMonth)
-
-		// Setup mock expectations
-		mockFS.On("FileExists", sourceFilePath).Return(true)
-		mockFS.On("MkdirAll", subDirPath, os.ModePerm).Return(errors.New("permission denied"))
-
-		// Capture original functions and restore after test
-		originalStat := osStat
-		originalMkdirAll := osMkdirAll
-
-		// Override with mocks
-		osStat = func(path string) (os.FileInfo, error) {
-			if mockFS.FileExists(path) {
-				return nil, nil
-			}
-			return nil, os.ErrNotExist
-		}
-
-		osMkdirAll = mockFS.MkdirAll
-
-		// Restore original functions after test
-		defer func() {
-			osStat = originalStat
-			osMkdirAll = originalMkdirAll
-		}()
+		expectedFileName := "testus_birdus_85p_20230115T134530Z.wav"
+		targetFilePath := filepath.Join(targetDir, expectedYear, expectedMonth, expectedFileName)
 
 		// Execute - this should not panic and handle the error gracefully
-		handleFileTransfer(&detection, sourceDir, targetDir, CopyFile)
+		handleFileTransferWithFS(detection, sourceDir, targetDir, CopyFile, mockFS)
 
-		// Verify
-		mockFS.AssertExpectations(t)
+		// Verify that no file was created due to directory creation failure
+		if mockFS.FileExists(targetFilePath) {
+			t.Errorf("handleFileTransfer() created a target file despite directory creation failure")
+		}
 	})
 }
-
-// Shadow the OS and file operation functions to allow testing with mocks
-var (
-	osStat       = os.Stat
-	osMkdirAll   = os.MkdirAll
-	fileCopyFunc = copyFile
-	fileMoveFunc = moveFile
-)

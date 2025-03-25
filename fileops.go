@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,63 +12,188 @@ import (
 	"time"
 )
 
-// handleFileTransfer manages the process of transferring a file from a source to a target directory
-// based on a detection event. It involves renaming the file according to a specified format,
-// creating necessary subdirectories in the target location, and performing the file transfer operation.
+// FileSystem defines an interface for file operations that can be mocked in tests
+type FileSystem interface {
+	MkdirAll(path string, perm fs.FileMode) error
+	Stat(name string) (fs.FileInfo, error)
+	Remove(name string) error
+	Create(name string) (io.WriteCloser, error)
+	Open(name string) (io.ReadCloser, error)
+	ReadFile(name string) ([]byte, error)
+	WriteFile(name string, data []byte, perm fs.FileMode) error
+	FileExists(name string) bool
+}
+
+// OsFS implements FileSystem using the os package
+type OsFS struct{}
+
+func (fs OsFS) MkdirAll(path string, perm fs.FileMode) error {
+	return os.MkdirAll(path, perm)
+}
+
+func (fs OsFS) Stat(name string) (fs.FileInfo, error) {
+	return os.Stat(name)
+}
+
+func (fs OsFS) Remove(name string) error {
+	return os.Remove(name)
+}
+
+func (fs OsFS) Create(name string) (io.WriteCloser, error) {
+	return os.Create(name)
+}
+
+func (fs OsFS) Open(name string) (io.ReadCloser, error) {
+	return os.Open(name)
+}
+
+func (fs OsFS) ReadFile(name string) ([]byte, error) {
+	return os.ReadFile(name)
+}
+
+func (fs OsFS) WriteFile(name string, data []byte, perm fs.FileMode) error {
+	return os.WriteFile(name, data, perm)
+}
+
+func (fs OsFS) FileExists(name string) bool {
+	_, err := os.Stat(name)
+	return !os.IsNotExist(err)
+}
+
+// DefaultFS is the default filesystem implementation
+var DefaultFS FileSystem = OsFS{}
+
+// handleFileTransfer processes a detection record, copying or moving the audio file to the target location
 func handleFileTransfer(detection *Detection, sourceFilesDir, targetFilesDir string, operation FileOperationType) {
-	// Custom layout to parse the detection date and time.
-	const customLayout = "2006-01-02T15:04:05"
+	handleFileTransferWithFS(detection, sourceFilesDir, targetFilesDir, operation, DefaultFS)
+}
 
-	dateTime := detection.Date + "T" + detection.Time
+// handleFileTransferWithFS processes a detection record, copying or moving the audio file using the provided filesystem implementation
+func handleFileTransferWithFS(detection *Detection, sourceFilesDir, targetFilesDir string, operation FileOperationType, fs FileSystem) {
+	// Construct the path to the source audio file
+	sourceFilePath := filepath.Join(sourceFilesDir, "Extracted", "By_Date", detection.Date, detection.ComName, detection.FileName)
 
-	parsedDate, err := time.Parse(customLayout, dateTime)
-	if err != nil {
-		log.Printf("Error parsing combined date and time: %v", err)
-		return // Ensure further processing is halted upon error.
+	// Check if the source file exists
+	if !fs.FileExists(sourceFilePath) {
+		log.Printf("Source file not found: %s", sourceFilePath)
+		return
 	}
-	/*
-		// Format the date and time for the filename in the format YYYYMMDDTHHMMSSZ.
-		formattedDateTime := parsedDate.Format("20060102T150405Z")
 
-		// Format the scientific name for the filename: lowercase, spaces to underscores, remove hyphens and colons.
-		sciNameFormatted := strings.ToLower(strings.ReplaceAll(detection.SciName, " ", "_"))
+	// Generate a new filename that follows the BIRDNET-Pi naming convention
+	newFileName := GenerateClipName(detection)
 
-		// Generate the new filename with the formatted date, time, and confidence level.
-		confidencePercentage := fmt.Sprintf("%dp", int(detection.Confidence*100))
-		newFileName := fmt.Sprintf("%s_%s_%s.wav", sciNameFormatted, confidencePercentage, formattedDateTime)
-	*/
+	// Parse the date from the detection to determine target subdirectories
+	parsedDate, err := time.Parse("2006-01-02T15:04:05", detection.Date+"T"+detection.Time)
+	if err != nil {
+		log.Printf("Error parsing date: %v", err)
+		return
+	}
 
-	// Determine the year and month for subdirectory structuring within the target directory.
-	year, month := parsedDate.Format("2006"), parsedDate.Format("01")
-	subDirPath := filepath.Join(targetFilesDir, year, month)
+	// Format the date for target directory structure (year/month)
+	year := parsedDate.Format("2006")
+	month := parsedDate.Format("01")
 
-	// Ensure the target subdirectories exist or create them.
-	if err := os.MkdirAll(subDirPath, os.ModePerm); err != nil {
+	// Construct the full target path
+	targetSubDir := filepath.Join(targetFilesDir, year, month)
+	targetFilePath := filepath.Join(targetSubDir, newFileName)
+
+	// Ensure target directory exists
+	err = fs.MkdirAll(targetSubDir, 0755)
+	if err != nil {
 		log.Printf("Failed to create subdirectories: %v", err)
 		return
 	}
 
-	// Construct the full target file path with the new filename.
-	newFileName := GenerateClipName(detection)
-	targetFilePath := filepath.Join(subDirPath, newFileName)
-	//fmt.Println(targetFilePath)
-
-	// Construct the source directory and file paths.
-	sourceDirPath := filepath.Join(sourceFilesDir, "Extracted", "By_Date", detection.Date, detection.ComName)
-	sourceFilePath := filepath.Join(sourceDirPath, detection.FileName)
-
-	// Check if the source file exists before attempting transfer.
-	if _, err := os.Stat(sourceFilePath); os.IsNotExist(err) {
-		//log.Printf("Source file does not exist, skipping copy: %s", sourceFilePath)
-		return
-	} else {
-		// Perform the file operation (copy or move).
-		if err := performFileOperation(sourceFilePath, targetFilePath, operation); err != nil {
-			log.Printf("File operation error: %v", err)
+	// Perform the file operation based on the specified operation type
+	switch operation {
+	case CopyFile:
+		// Read the source file
+		data, err := fs.ReadFile(sourceFilePath)
+		if err != nil {
+			log.Printf("Failed to read source file: %v", err)
+			return
 		}
+
+		// Write to the target file
+		err = fs.WriteFile(targetFilePath, data, 0644)
+		if err != nil {
+			log.Printf("Failed to write target file: %v", err)
+			return
+		}
+
+		log.Printf("Copied %s to %s", sourceFilePath, targetFilePath)
+
+	case MoveFile:
+		// Read the source file
+		data, err := fs.ReadFile(sourceFilePath)
+		if err != nil {
+			log.Printf("Failed to read source file: %v", err)
+			return
+		}
+
+		// Write to the target file
+		err = fs.WriteFile(targetFilePath, data, 0644)
+		if err != nil {
+			log.Printf("Failed to write target file: %v", err)
+			return
+		}
+
+		// Remove the source file
+		err = fs.Remove(sourceFilePath)
+		if err != nil {
+			log.Printf("Failed to remove source file after move: %v", err)
+			// Continue execution even if source removal fails
+		}
+
+		log.Printf("Moved %s to %s", sourceFilePath, targetFilePath)
+
+	default:
+		log.Printf("Unsupported file operation: %v", operation)
 	}
 }
 
+// performFileOperationWithFS abstracts the logic for copying or moving files using the provided filesystem
+func performFileOperationWithFS(sourceFilePath, targetFilePath string, operation FileOperationType, fs FileSystem) error {
+	switch operation {
+	case CopyFile:
+		return copyFileWithFS(sourceFilePath, targetFilePath, fs)
+	case MoveFile:
+		return moveFileWithFS(sourceFilePath, targetFilePath, fs)
+	default:
+		return fmt.Errorf("unsupported file operation")
+	}
+}
+
+// copyFileWithFS handles the copying of a file using the provided filesystem
+func copyFileWithFS(src, dst string, fs FileSystem) error {
+	sourceFile, err := fs.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destinationFile, err := fs.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destinationFile.Close()
+
+	// Perform the actual file copy operation.
+	_, err = io.Copy(destinationFile, sourceFile)
+	return err
+}
+
+// moveFileWithFS handles moving a file using the provided filesystem
+func moveFileWithFS(src, dst string, fs FileSystem) error {
+	// First copy the file
+	if err := copyFileWithFS(src, dst, fs); err != nil {
+		return err
+	}
+	// Then remove the source
+	return fs.Remove(src)
+}
+
+// GenerateClipName generates a standardized filename for audio clips.
 func GenerateClipName(detection *Detection) string {
 	// Custom layout to parse the detection date and time.
 	const customLayout = "2006-01-02T15:04:05"
@@ -96,39 +222,15 @@ func GenerateClipName(detection *Detection) string {
 	return newFileName
 }
 
-// performFileOperation abstracts the logic for copying or moving files based on the specified operation.
+// For backward compatibility, keep these functions that use the OS filesystem directly
 func performFileOperation(sourceFilePath, targetFilePath string, operation FileOperationType) error {
-	switch operation {
-	case CopyFile:
-		return copyFile(sourceFilePath, targetFilePath)
-	case MoveFile:
-		return moveFile(sourceFilePath, targetFilePath)
-	default:
-		return fmt.Errorf("unsupported file operation")
-	}
+	return performFileOperationWithFS(sourceFilePath, targetFilePath, operation, DefaultFS)
 }
 
-// copyFile handles the copying of a file from the source path to the destination path.
 func copyFile(src, dst string) error {
-	sourceFile, err := os.Open(src)
-	if err != nil {
-		return err // Handle file opening error.
-	}
-	defer sourceFile.Close()
-
-	destinationFile, err := os.Create(dst)
-	if err != nil {
-		return err // Handle destination file creation error.
-	}
-	defer destinationFile.Close()
-
-	// Perform the actual file copy operation.
-	_, err = io.Copy(destinationFile, sourceFile)
-	return err // Return the result of the copy operation.
+	return copyFileWithFS(src, dst, DefaultFS)
 }
 
-// moveFile handles moving a file from the source path to the destination path.
 func moveFile(src, dst string) error {
-	// Attempt to rename (move) the file directly.
-	return os.Rename(src, dst)
+	return moveFileWithFS(src, dst, DefaultFS)
 }

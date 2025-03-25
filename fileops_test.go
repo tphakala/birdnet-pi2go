@@ -151,8 +151,133 @@ func TestMoveFile(t *testing.T) {
 	}
 }
 
+func TestHandleFileTransfer(t *testing.T) {
+	t.Parallel()
+
+	// Use our mock filesystem instead of the real filesystem
+	mockFS := NewMockFS()
+
+	// Create test data
+	testDate := "2023-01-15"
+	testComName := "Test Bird"
+	testFileName := "test_audio.wav"
+	sourceContent := []byte("This is test audio content")
+
+	// Create the expected source directory structure in the mock filesystem
+	sourceRoot := "/source"
+	targetRoot := "/target"
+	extractedDir := filepath.Join(sourceRoot, "Extracted", "By_Date", testDate, testComName)
+	sourceFilePath := filepath.Join(extractedDir, testFileName)
+
+	// Set up directories and file in the mock filesystem
+	mockFS.MkdirAll(extractedDir, 0o755)
+	mockFS.WriteFile(sourceFilePath, sourceContent, 0o644)
+
+	// Create a test detection
+	detection := &Detection{
+		Date:       testDate,
+		Time:       "13:45:30",
+		SciName:    "Testus birdus",
+		ComName:    testComName,
+		Confidence: 0.85,
+		FileName:   testFileName,
+	}
+
+	// Test handleFileTransfer with copy operation
+	t.Run("Copy operation", func(t *testing.T) {
+		// Use the FS-parameterized version of handleFileTransfer
+		handleFileTransferWithFS(detection, sourceRoot, targetRoot, CopyFile, mockFS)
+
+		// The function will create a directory structure like YYYY/MM with the new filename
+		parsedDate, _ := time.Parse("2006-01-02T15:04:05", testDate+"T"+"13:45:30")
+		expectedYear := parsedDate.Format("2006")
+		expectedMonth := parsedDate.Format("01")
+		expectedFilename := "testus_birdus_85p_20230115T134530Z.wav"
+
+		expectedTargetPath := filepath.Join(targetRoot, expectedYear, expectedMonth, expectedFilename)
+
+		// Verify the file was copied to the expected location
+		if !mockFS.FileExists(expectedTargetPath) {
+			t.Errorf("handleFileTransfer() did not copy file to expected location: %s", expectedTargetPath)
+		} else {
+			// Verify the source file still exists (copy, not move)
+			if !mockFS.FileExists(sourceFilePath) {
+				t.Errorf("handleFileTransfer() with CopyFile removed the source file")
+			}
+
+			// Verify the content of the copied file
+			targetContent, err := mockFS.ReadFile(expectedTargetPath)
+			if err != nil {
+				t.Fatalf("Failed to read copied file: %v", err)
+			}
+
+			if string(targetContent) != string(sourceContent) {
+				t.Errorf("handleFileTransfer() copied content does not match source content")
+			}
+		}
+	})
+
+	// Test handling of non-existent source file
+	t.Run("Non-existent source file", func(t *testing.T) {
+		nonExistentDetection := &Detection{
+			Date:       testDate,
+			Time:       "14:00:00",
+			SciName:    "Nonexistus birdus",
+			ComName:    "Non-existent Bird",
+			Confidence: 0.90,
+			FileName:   "nonexistent.wav",
+		}
+
+		// This should not panic or error, but should silently skip
+		handleFileTransferWithFS(nonExistentDetection, sourceRoot, targetRoot, CopyFile, mockFS)
+	})
+
+	// Now test with move operation
+	t.Run("Move operation", func(t *testing.T) {
+		// Reset by creating a new file
+		moveSourceDir := "/move_source"
+		moveExtractedDir := filepath.Join(moveSourceDir, "Extracted", "By_Date", testDate, testComName)
+		mockFS.MkdirAll(moveExtractedDir, 0o755)
+
+		moveSourceFilePath := filepath.Join(moveExtractedDir, testFileName)
+		mockFS.WriteFile(moveSourceFilePath, sourceContent, 0o644)
+
+		// Test handleFileTransfer with move operation
+		handleFileTransferWithFS(detection, moveSourceDir, targetRoot, MoveFile, mockFS)
+
+		parsedDate, _ := time.Parse("2006-01-02T15:04:05", testDate+"T"+"13:45:30")
+		expectedYear := parsedDate.Format("2006")
+		expectedMonth := parsedDate.Format("01")
+		expectedFilename := "testus_birdus_85p_20230115T134530Z.wav"
+
+		expectedTargetPath := filepath.Join(targetRoot, expectedYear, expectedMonth, expectedFilename)
+
+		// Verify the file was moved to the expected location
+		if !mockFS.FileExists(expectedTargetPath) {
+			t.Errorf("handleFileTransfer() did not move file to expected location: %s", expectedTargetPath)
+		} else {
+			// Verify the source file no longer exists (move, not copy)
+			if mockFS.FileExists(moveSourceFilePath) {
+				t.Errorf("handleFileTransfer() with MoveFile did not remove the source file")
+			}
+
+			// Verify the content of the moved file
+			targetContent, err := mockFS.ReadFile(expectedTargetPath)
+			if err != nil {
+				t.Fatalf("Failed to read moved file: %v", err)
+			}
+
+			if string(targetContent) != string(sourceContent) {
+				t.Errorf("handleFileTransfer() moved content does not match source content")
+			}
+		}
+	})
+}
+
 func TestPerformFileOperation(t *testing.T) {
 	t.Parallel()
+
+	mockFS := NewMockFS()
 
 	tests := []struct {
 		name          string
@@ -200,25 +325,22 @@ func TestPerformFileOperation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			// Create a temporary directory for testing
-			tempDir := t.TempDir()
-
 			// Setup source and destination file paths
-			sourceFile := filepath.Join(tempDir, "source.txt")
-			destFile := filepath.Join(tempDir, "dest.txt")
+			sourceFile := "/source/test.txt"
+			destFile := "/target/dest.txt"
+
+			// Ensure directories exist
+			mockFS.MkdirAll(filepath.Dir(sourceFile), 0o755)
+			mockFS.MkdirAll(filepath.Dir(destFile), 0o755)
 
 			// Create source file if needed for this test case
 			if tt.sourceExists {
 				sourceContent := []byte("Test content for file operation")
-				if err := os.WriteFile(sourceFile, sourceContent, 0o644); err != nil {
-					t.Fatalf("Failed to create source file: %v", err)
-				}
+				mockFS.WriteFile(sourceFile, sourceContent, 0o644)
 			}
 
 			// Test the function
-			err := performFileOperation(sourceFile, destFile, tt.operation)
+			err := performFileOperationWithFS(sourceFile, destFile, tt.operation, mockFS)
 
 			// Check if error matches expectation
 			if (err != nil) != tt.expectedError {
@@ -227,140 +349,24 @@ func TestPerformFileOperation(t *testing.T) {
 
 			// Verify destination file exists if operation should succeed
 			if !tt.expectedError {
-				if _, err := os.Stat(destFile); os.IsNotExist(err) {
+				if !mockFS.FileExists(destFile) {
 					t.Errorf("performFileOperation() destination file doesn't exist after operation")
 				}
 
 				// For move operation, source should no longer exist
 				if tt.operation == MoveFile {
-					if _, err := os.Stat(sourceFile); !os.IsNotExist(err) {
+					if mockFS.FileExists(sourceFile) {
 						t.Errorf("performFileOperation() source file still exists after move")
 					}
 				}
 
 				// For copy operation, source should still exist
 				if tt.operation == CopyFile {
-					if _, err := os.Stat(sourceFile); os.IsNotExist(err) {
+					if !mockFS.FileExists(sourceFile) {
 						t.Errorf("performFileOperation() source file doesn't exist after copy")
 					}
 				}
 			}
 		})
-	}
-}
-
-func TestHandleFileTransfer(t *testing.T) {
-	// Create temporary directories for source and target
-	sourceRoot := t.TempDir()
-	targetRoot := t.TempDir()
-
-	// Create the expected source directory structure
-	testDate := "2023-01-15"
-	testComName := "Test Bird"
-	testFileName := "test_audio.wav"
-	extractedDir := filepath.Join(sourceRoot, "Extracted", "By_Date", testDate, testComName)
-
-	if err := os.MkdirAll(extractedDir, 0o755); err != nil {
-		t.Fatalf("Failed to create test directory structure: %v", err)
-	}
-
-	// Create a test audio file
-	sourceFilePath := filepath.Join(extractedDir, testFileName)
-	testContent := []byte("This is test audio content")
-	if err := os.WriteFile(sourceFilePath, testContent, 0o644); err != nil {
-		t.Fatalf("Failed to create test audio file: %v", err)
-	}
-
-	// Create a test detection
-	detection := Detection{
-		Date:       testDate,
-		Time:       "13:45:30",
-		SciName:    "Testus birdus",
-		ComName:    testComName,
-		Confidence: 0.85,
-		FileName:   testFileName,
-	}
-
-	// Test handleFileTransfer with copy operation
-	handleFileTransfer(&detection, sourceRoot, targetRoot, CopyFile)
-
-	// The function will create a directory structure like YYYY/MM with the new filename
-	parsedDate, _ := time.Parse("2006-01-02T15:04:05", testDate+"T"+"13:45:30")
-	expectedYear := parsedDate.Format("2006")
-	expectedMonth := parsedDate.Format("01")
-	expectedFilename := "testus_birdus_85p_20230115T134530Z.wav"
-
-	expectedTargetPath := filepath.Join(targetRoot, expectedYear, expectedMonth, expectedFilename)
-
-	// Verify the file was copied to the expected location
-	if _, err := os.Stat(expectedTargetPath); os.IsNotExist(err) {
-		t.Errorf("handleFileTransfer() did not copy file to expected location: %s", expectedTargetPath)
-	} else {
-		// Verify the source file still exists (copy, not move)
-		if _, err := os.Stat(sourceFilePath); os.IsNotExist(err) {
-			t.Errorf("handleFileTransfer() with CopyFile removed the source file")
-		}
-
-		// Verify the content of the copied file
-		targetContent, err := os.ReadFile(expectedTargetPath)
-		if err != nil {
-			t.Fatalf("Failed to read copied file: %v", err)
-		}
-
-		if !bytes.Equal(targetContent, testContent) {
-			t.Errorf("handleFileTransfer() copied content does not match source content")
-		}
-	}
-
-	// Test handling of non-existent source file
-	nonExistentDetection := Detection{
-		Date:       testDate,
-		Time:       "14:00:00",
-		SciName:    "Nonexistus birdus",
-		ComName:    "Non-existent Bird",
-		Confidence: 0.90,
-		FileName:   "nonexistent.wav",
-	}
-
-	// This should not panic or error, but should silently skip
-	handleFileTransfer(&nonExistentDetection, sourceRoot, targetRoot, CopyFile)
-
-	// Now test with move operation
-	sourceRoot2 := t.TempDir()
-	targetRoot2 := t.TempDir()
-
-	extractedDir2 := filepath.Join(sourceRoot2, "Extracted", "By_Date", testDate, testComName)
-	if err := os.MkdirAll(extractedDir2, 0o755); err != nil {
-		t.Fatalf("Failed to create test directory structure: %v", err)
-	}
-
-	sourceFilePath2 := filepath.Join(extractedDir2, testFileName)
-	if err := os.WriteFile(sourceFilePath2, testContent, 0o644); err != nil {
-		t.Fatalf("Failed to create test audio file: %v", err)
-	}
-
-	// Test handleFileTransfer with move operation
-	handleFileTransfer(&detection, sourceRoot2, targetRoot2, MoveFile)
-
-	expectedTargetPath2 := filepath.Join(targetRoot2, expectedYear, expectedMonth, expectedFilename)
-
-	// Verify the file was moved to the expected location
-	if _, err := os.Stat(expectedTargetPath2); os.IsNotExist(err) {
-		t.Errorf("handleFileTransfer() did not move file to expected location: %s", expectedTargetPath2)
-	} else {
-		// Verify the source file no longer exists (move, not copy)
-		if _, err := os.Stat(sourceFilePath2); !os.IsNotExist(err) {
-			t.Errorf("handleFileTransfer() with MoveFile did not remove the source file")
-		}
-
-		// Verify the content of the moved file
-		targetContent, err := os.ReadFile(expectedTargetPath2)
-		if err != nil {
-			t.Fatalf("Failed to read moved file: %v", err)
-		}
-
-		if !bytes.Equal(targetContent, testContent) {
-			t.Errorf("handleFileTransfer() moved content does not match source content")
-		}
 	}
 }
