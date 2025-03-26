@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -752,4 +754,462 @@ func customMergeDetectionsToNotes(sourceDBPath, targetDBPath string) error {
 	}
 
 	return nil
+}
+
+// TestMergeWithRealBirdsDB tests merging the real birds.db (containing detections) into a target database
+func TestMergeWithRealBirdsDB(t *testing.T) {
+	// Skip this test when running in short mode
+	if testing.Short() {
+		t.Skip("Skipping test with real birds.db in short mode")
+	}
+
+	// Check if birds.db exists in the current directory
+	if _, err := os.Stat("birds.db"); os.IsNotExist(err) {
+		t.Skip("birds.db not found in current directory, skipping test")
+	}
+
+	// Create a temporary directory for target DB
+	tempDir := t.TempDir()
+	targetDBPath := filepath.Join(tempDir, "target_real_test.db")
+
+	// Create an empty target database
+	targetDB, err := gorm.Open(sqlite.Open(targetDBPath), &gorm.Config{
+		Logger: logger.New(
+			nil, // Don't log to stdout during tests
+			logger.Config{
+				SlowThreshold: 1 * time.Second,
+				LogLevel:      logger.Silent,
+				Colorful:      false,
+			},
+		),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create target database: %v", err)
+	}
+
+	// Migrate schema to create the Note table in target DB
+	if err := targetDB.AutoMigrate(&Note{}); err != nil {
+		t.Fatalf("Failed to migrate target schema: %v", err)
+	}
+
+	// Add a few notes to the target database (to test merging with existing data)
+	initialNotes := []Note{
+		{
+			Date:           "2023-12-01",
+			Time:           "09:00:00",
+			ScientificName: "Existing Species 1",
+			CommonName:     "Existing Bird 1",
+			Confidence:     0.8,
+			ClipName:       "existing1.wav",
+			Verified:       "unverified",
+		},
+		{
+			Date:           "2023-12-02",
+			Time:           "10:30:00",
+			ScientificName: "Existing Species 2",
+			CommonName:     "Existing Bird 2",
+			Confidence:     0.7,
+			ClipName:       "existing2.wav",
+			Verified:       "unverified",
+		},
+	}
+
+	for _, note := range initialNotes {
+		if err := targetDB.Create(&note).Error; err != nil {
+			t.Fatalf("Failed to create initial note in target DB: %v", err)
+		}
+	}
+
+	// Count initial records in target DB
+	var initialCount int64
+	if err := targetDB.Model(&Note{}).Count(&initialCount).Error; err != nil {
+		t.Fatalf("Failed to count initial records: %v", err)
+	}
+
+	t.Logf("Initial count in target DB: %d", initialCount)
+
+	// Close the target DB connection to ensure changes are flushed
+	targetSqlDB, err := targetDB.DB()
+	if err == nil {
+		targetSqlDB.Close()
+	}
+
+	// Get a count of records in birds.db for verification later
+	birdsDB, err := gorm.Open(sqlite.Open("birds.db"), &gorm.Config{
+		Logger: logger.New(
+			nil,
+			logger.Config{
+				SlowThreshold: 1 * time.Second,
+				LogLevel:      logger.Silent,
+				Colorful:      false,
+			},
+		),
+	})
+	if err != nil {
+		t.Fatalf("Failed to open birds.db: %v", err)
+	}
+
+	var detectionsCount int64
+	if err := birdsDB.Raw("SELECT COUNT(*) FROM detections").Count(&detectionsCount).Error; err != nil {
+		t.Fatalf("Failed to count detections in birds.db: %v", err)
+	}
+
+	t.Logf("Found %d detections in birds.db", detectionsCount)
+
+	// Close birds.db connection
+	birdsDBSql, err := birdsDB.DB()
+	if err == nil {
+		birdsDBSql.Close()
+	}
+
+	// Perform the merge - using our real birds.db
+	t.Logf("Starting merge from birds.db to target database")
+	startTime := time.Now()
+	err = MergeDatabases("birds.db", targetDBPath)
+	if err != nil {
+		t.Fatalf("MergeDatabases() error = %v", err)
+	}
+	mergeTime := time.Since(startTime)
+	t.Logf("Merge completed in %v", mergeTime)
+
+	// Reopen the target database to check results
+	targetDB, err = gorm.Open(sqlite.Open(targetDBPath), &gorm.Config{
+		Logger: logger.New(
+			nil,
+			logger.Config{
+				SlowThreshold: 1 * time.Second,
+				LogLevel:      logger.Silent,
+				Colorful:      false,
+			},
+		),
+	})
+	if err != nil {
+		t.Fatalf("Failed to reopen target database: %v", err)
+	}
+
+	// Count records after merge
+	var finalCount int64
+	if err := targetDB.Model(&Note{}).Count(&finalCount).Error; err != nil {
+		t.Fatalf("Failed to count final records: %v", err)
+	}
+
+	t.Logf("Final count in target DB: %d", finalCount)
+
+	// Expected count is the initial count plus the detections count
+	expectedCount := initialCount + detectionsCount
+	if finalCount < expectedCount-1 || finalCount > expectedCount+1 {
+		t.Errorf("Final count after merge: got %d, want approximately %d", finalCount, expectedCount)
+	} else {
+		t.Logf("Final count after merge is within acceptable range: got %d, expected approximately %d", finalCount, expectedCount)
+	}
+
+	// Verify some specific records from birds.db were properly converted and inserted
+	// Check a few specific species by scientific name
+	speciesToCheck := []string{
+		"Dendrocopos major",  // Great Spotted Woodpecker
+		"Anas platyrhynchos", // Mallard
+		"Porzana porzana",    // Spotted Crake
+	}
+
+	for _, species := range speciesToCheck {
+		var count int64
+		if err := targetDB.Model(&Note{}).Where("scientific_name = ?", species).Count(&count).Error; err != nil {
+			t.Errorf("Error counting records for %s: %v", species, err)
+		} else if count == 0 {
+			t.Errorf("No records found for species %s after merge", species)
+		} else {
+			t.Logf("Found %d records for species %s after merge", count, species)
+		}
+	}
+
+	// Sample some records to verify data integrity
+	var sampleNotes []Note
+	if err := targetDB.Where("scientific_name IN ?", speciesToCheck).Limit(10).Find(&sampleNotes).Error; err != nil {
+		t.Errorf("Error fetching sample notes: %v", err)
+	} else {
+		for i, note := range sampleNotes {
+			t.Logf("Sample Note #%d: Scientific Name=%s, Common Name=%s, Date=%s, Time=%s, Confidence=%.4f",
+				i, note.ScientificName, note.CommonName, note.Date, note.Time, note.Confidence)
+		}
+	}
+}
+
+// TestBatchSizePerformance tests the performance of different batch sizes when merging databases
+func TestBatchSizePerformance(t *testing.T) {
+	// Skip this test when running in short mode
+	if testing.Short() {
+		t.Skip("Skipping batch size performance test in short mode")
+	}
+
+	// Check if birds.db exists in the current directory
+	if _, err := os.Stat("birds.db"); os.IsNotExist(err) {
+		t.Skip("birds.db not found in current directory, skipping test")
+	}
+
+	// Define batch sizes to test
+	batchSizes := []int{100, 500, 1000, 5000, 10000}
+
+	// Get a count of records in birds.db for verification later
+	birdsDB, err := gorm.Open(sqlite.Open("birds.db"), &gorm.Config{
+		Logger: logger.New(
+			nil,
+			logger.Config{
+				SlowThreshold: 1 * time.Second,
+				LogLevel:      logger.Silent,
+				Colorful:      false,
+			},
+		),
+	})
+	if err != nil {
+		t.Fatalf("Failed to open birds.db: %v", err)
+	}
+
+	var detectionsCount int64
+	if err := birdsDB.Raw("SELECT COUNT(*) FROM detections").Count(&detectionsCount).Error; err != nil {
+		t.Fatalf("Failed to count detections in birds.db: %v", err)
+	}
+
+	// Close birds.db connection
+	birdsDBSql, err := birdsDB.DB()
+	if err == nil {
+		birdsDBSql.Close()
+	}
+
+	type result struct {
+		batchSize int
+		duration  time.Duration
+		count     int64
+	}
+
+	var results []result
+
+	for _, batchSize := range batchSizes {
+		// Create a temporary directory for target DB
+		tempDir := t.TempDir()
+		targetDBPath := filepath.Join(tempDir, fmt.Sprintf("target_batch_%d.db", batchSize))
+
+		// Create an empty target database
+		targetDB, err := gorm.Open(sqlite.Open(targetDBPath), &gorm.Config{
+			Logger: logger.New(
+				nil,
+				logger.Config{
+					SlowThreshold: 1 * time.Second,
+					LogLevel:      logger.Silent,
+					Colorful:      false,
+				},
+			),
+		})
+		if err != nil {
+			t.Fatalf("Failed to create target database for batch size %d: %v", batchSize, err)
+		}
+
+		// Migrate schema to create the Note table in target DB
+		if err := targetDB.AutoMigrate(&Note{}); err != nil {
+			t.Fatalf("Failed to migrate target schema for batch size %d: %v", batchSize, err)
+		}
+
+		// Close the target DB connection to ensure changes are flushed
+		targetSqlDB, err := targetDB.DB()
+		if err == nil {
+			targetSqlDB.Close()
+		}
+
+		// Create a custom merge function with the specific batch size
+		mergeFn := func() error {
+			// Connect to the source database
+			sourceDB := initializeAndMigrateTargetDB("birds.db", createGormLogger())
+
+			// Connect to the target database
+			targetDB := initializeAndMigrateTargetDB(targetDBPath, createGormLogger())
+
+			// Check if it has a Detections table
+			var detectionsCount int64
+			if err := sourceDB.Raw("SELECT COUNT(*) FROM detections").Count(&detectionsCount).Error; err != nil {
+				return fmt.Errorf("source database doesn't have a valid Notes or Detections table: %w", err)
+			}
+
+			// Calculate the number of batches needed
+			numBatches := (detectionsCount + int64(batchSize) - 1) / int64(batchSize)
+
+			for i := int64(0); i < numBatches; i++ {
+				// Retrieve a batch of detections from the source database
+				var detections []Detection
+				if err := sourceDB.Raw(
+					"SELECT * FROM detections LIMIT ? OFFSET ?",
+					batchSize, i*int64(batchSize)).Scan(&detections).Error; err != nil {
+					return fmt.Errorf("failed to retrieve batch of detections: %w", err)
+				}
+
+				// Convert and insert each detection into the target database
+				for j := range detections {
+					note := convertDetectionToNote(&detections[j])
+					if err := targetDB.Create(&note).Error; err != nil {
+						log.Printf("Error inserting converted detection: %v", err)
+						continue
+					}
+				}
+			}
+
+			return nil
+		}
+
+		// Time the merge operation
+		t.Logf("Testing batch size: %d", batchSize)
+		start := time.Now()
+		err = mergeFn()
+		duration := time.Since(start)
+
+		if err != nil {
+			t.Errorf("Error merging with batch size %d: %v", batchSize, err)
+			continue
+		}
+
+		// Verify the count
+		targetDB, err = gorm.Open(sqlite.Open(targetDBPath), &gorm.Config{})
+		if err != nil {
+			t.Errorf("Failed to open target DB after merge for batch size %d: %v", batchSize, err)
+			continue
+		}
+
+		var finalCount int64
+		if err := targetDB.Model(&Note{}).Count(&finalCount).Error; err != nil {
+			t.Errorf("Failed to count records for batch size %d: %v", batchSize, err)
+			continue
+		}
+
+		results = append(results, result{
+			batchSize: batchSize,
+			duration:  duration,
+			count:     finalCount,
+		})
+
+		t.Logf("Batch size %d: Merged %d records in %v", batchSize, finalCount, duration)
+	}
+
+	// Print a summary
+	t.Log("Performance summary:")
+	for _, r := range results {
+		t.Logf("Batch size: %d - Duration: %v - Records: %d", r.batchSize, r.duration, r.count)
+	}
+}
+
+// TestMergeDatabasesErrorHandling tests how the MergeDatabases function handles various error cases
+func TestMergeDatabasesErrorHandling(t *testing.T) {
+	t.Parallel()
+
+	// Create a temporary directory for our test databases
+	tempDir := t.TempDir()
+
+	// Test case 1: Source database doesn't exist
+	t.Run("Non-existent source database", func(t *testing.T) {
+		targetDBPath := filepath.Join(tempDir, "target1.db")
+		err := MergeDatabases("/nonexistent/path/to/source.db", targetDBPath)
+		if err == nil {
+			t.Error("Expected error when merging from non-existent source database, but got nil")
+		} else {
+			t.Logf("Got expected error for non-existent source database: %v", err)
+		}
+	})
+
+	// Test case 2: Source database with the same path as target (which should fail)
+	t.Run("Same path for source and target", func(t *testing.T) {
+		// Create a valid database
+		dbPath := filepath.Join(tempDir, "same_path.db")
+		db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+		if err != nil {
+			t.Fatalf("Failed to create test database: %v", err)
+		}
+		if err := db.AutoMigrate(&Note{}); err != nil {
+			t.Fatalf("Failed to migrate schema: %v", err)
+		}
+
+		// Create a test note
+		testNote := Note{
+			Date:           "2023-01-01",
+			Time:           "12:00:00",
+			ScientificName: "Test Species",
+			CommonName:     "Test Bird",
+		}
+		if err := db.Create(&testNote).Error; err != nil {
+			t.Fatalf("Failed to create test note: %v", err)
+		}
+
+		// Flush the database
+		sqlDB, err := db.DB()
+		if err == nil {
+			sqlDB.Close()
+		}
+
+		// Try to merge to itself
+		err = MergeDatabases(dbPath, dbPath)
+		if err == nil {
+			t.Error("Expected error when source and target are the same path, but got nil")
+		} else {
+			t.Logf("Got expected error when source and target are the same: %v", err)
+		}
+	})
+
+	// Test case 3: Empty source database
+	t.Run("Empty source database", func(t *testing.T) {
+		// Create an empty source database with just the schema
+		sourceDBPath := filepath.Join(tempDir, "empty_source.db")
+		sourceDB, err := gorm.Open(sqlite.Open(sourceDBPath), &gorm.Config{})
+		if err != nil {
+			t.Fatalf("Failed to create empty source database: %v", err)
+		}
+		if err := sourceDB.AutoMigrate(&Note{}); err != nil {
+			t.Fatalf("Failed to migrate empty source schema: %v", err)
+		}
+
+		// Create target database
+		targetDBPath := filepath.Join(tempDir, "target_for_empty.db")
+		targetDB, err := gorm.Open(sqlite.Open(targetDBPath), &gorm.Config{})
+		if err != nil {
+			t.Fatalf("Failed to create target database: %v", err)
+		}
+		if err := targetDB.AutoMigrate(&Note{}); err != nil {
+			t.Fatalf("Failed to migrate target schema: %v", err)
+		}
+
+		// Add initial data to target
+		initialNote := Note{
+			Date:           "2023-01-01",
+			Time:           "12:00:00",
+			ScientificName: "Initial Species",
+			CommonName:     "Initial Bird",
+		}
+		if err := targetDB.Create(&initialNote).Error; err != nil {
+			t.Fatalf("Failed to create initial note in target DB: %v", err)
+		}
+
+		// Flush databases
+		sourceSqlDB, err := sourceDB.DB()
+		if err == nil {
+			sourceSqlDB.Close()
+		}
+		targetSqlDB, err := targetDB.DB()
+		if err == nil {
+			targetSqlDB.Close()
+		}
+
+		// Merge the empty source to target
+		err = MergeDatabases(sourceDBPath, targetDBPath)
+		if err != nil {
+			t.Errorf("Unexpected error when merging empty source: %v", err)
+		}
+
+		// Verify target still has its original data
+		targetDB, err = gorm.Open(sqlite.Open(targetDBPath), &gorm.Config{})
+		if err != nil {
+			t.Fatalf("Failed to reopen target database: %v", err)
+		}
+
+		var count int64
+		if err := targetDB.Model(&Note{}).Count(&count).Error; err != nil {
+			t.Errorf("Failed to count records in target after merge: %v", err)
+		}
+		if count != 1 {
+			t.Errorf("Expected 1 record in target after merging empty source, got %d", count)
+		}
+	})
 }

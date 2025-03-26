@@ -283,6 +283,11 @@ func formulateQuery(lastNote *Note) (whereClause string, params []any) {
 // MergeDatabases merges data from sourceDB into targetDB.
 // It can handle both source databases with Notes tables and Detections tables.
 func MergeDatabases(sourceDBPath, targetDBPath string) error {
+	// Check if source and target are the same path
+	if sourceDBPath == targetDBPath {
+		return fmt.Errorf("source and target database paths cannot be the same")
+	}
+
 	// Check if source database file exists
 	if _, err := os.Stat(sourceDBPath); os.IsNotExist(err) {
 		return fmt.Errorf("source database file does not exist: %s", sourceDBPath)
@@ -294,23 +299,49 @@ func MergeDatabases(sourceDBPath, targetDBPath string) error {
 	// Connect to the target database
 	targetDB := initializeAndMigrateTargetDB(targetDBPath, createGormLogger())
 
-	// First try to access the source database as a Notes database
-	var notesCount int64
+	// Check if the source database has a Notes table
 	hasNotesTable := true
+	var notesCount int64
 	if err := sourceDB.Model(&Note{}).Count(&notesCount).Error; err != nil {
-		// If there's an error accessing Notes table, it might be a Detections table
 		hasNotesTable = false
+	} else if notesCount == 0 {
+		// If Notes table exists but is empty, check if Detections table exists and has data
+		var detectionsTableExists int64
+		err := sourceDB.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='detections'").Count(&detectionsTableExists).Error
+		if err == nil && detectionsTableExists > 0 {
+			var detectionsCount int64
+			if err := sourceDB.Raw("SELECT COUNT(*) FROM detections").Count(&detectionsCount).Error; err == nil && detectionsCount > 0 {
+				// Detections table exists and has data, prefer using it
+				hasNotesTable = false
+				return mergeDetections(sourceDB, targetDB, detectionsCount)
+			}
+		}
 	}
 
-	// If source has Notes table, process it as Notes
-	if hasNotesTable {
+	// If source has Notes table with data, process it as Notes
+	if hasNotesTable && notesCount > 0 {
 		return mergeNotes(sourceDB, targetDB, notesCount)
+	} else if hasNotesTable && notesCount == 0 {
+		// Notes table exists but is empty, return success without doing anything
+		log.Println("Source database has an empty Notes table, nothing to merge.")
+		return nil
 	}
 
 	// Check if it has a Detections table
+	var detectionsTableExists int64
+	err := sourceDB.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='detections'").Count(&detectionsTableExists).Error
+	if err != nil || detectionsTableExists == 0 {
+		return fmt.Errorf("source database doesn't have a valid Notes or Detections table")
+	}
+
 	var detectionsCount int64
 	if err := sourceDB.Raw("SELECT COUNT(*) FROM detections").Count(&detectionsCount).Error; err != nil {
-		return fmt.Errorf("source database doesn't have a valid Notes or Detections table: %w", err)
+		return fmt.Errorf("error counting detections in source database: %w", err)
+	}
+
+	if detectionsCount == 0 {
+		log.Println("Source database has an empty Detections table, nothing to merge.")
+		return nil
 	}
 
 	// Process Detections table
