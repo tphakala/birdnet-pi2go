@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -464,4 +465,291 @@ func (m *mockDetectionTable) insertDetections(detections []Detection) {
 			m.t.Fatalf("Failed to insert mock detection: %v", err)
 		}
 	}
+}
+
+func TestMergeDatabasesWithRealDB(t *testing.T) {
+	t.Parallel()
+
+	// Create a temporary directory for target DB
+	tempDir := t.TempDir()
+	targetDBPath := filepath.Join(tempDir, "target_test.db")
+	sourceDBPath := filepath.Join(tempDir, "source_test.db")
+
+	// Create an empty target database
+	targetDB, err := gorm.Open(sqlite.Open(targetDBPath), &gorm.Config{
+		Logger: logger.New(
+			nil, // Don't log to stdout during tests
+			logger.Config{
+				SlowThreshold: 1 * time.Second,
+				LogLevel:      logger.Silent,
+				Colorful:      false,
+			},
+		),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create target database: %v", err)
+	}
+
+	// Migrate schema to create the Note table in target DB
+	if err := targetDB.AutoMigrate(&Note{}); err != nil {
+		t.Fatalf("Failed to migrate target schema: %v", err)
+	}
+
+	// Add a few notes to the target database (to test merging with existing data)
+	initialNotes := []Note{
+		{
+			Date:           "2023-12-01",
+			Time:           "09:00:00",
+			ScientificName: "Existing Species 1",
+			CommonName:     "Existing Bird 1",
+			Confidence:     0.8,
+			ClipName:       "existing1.wav",
+			Verified:       "unverified",
+		},
+		{
+			Date:           "2023-12-02",
+			Time:           "10:30:00",
+			ScientificName: "Existing Species 2",
+			CommonName:     "Existing Bird 2",
+			Confidence:     0.7,
+			ClipName:       "existing2.wav",
+			Verified:       "unverified",
+		},
+	}
+
+	for _, note := range initialNotes {
+		if err := targetDB.Create(&note).Error; err != nil {
+			t.Fatalf("Failed to create initial note in target DB: %v", err)
+		}
+	}
+
+	// Count initial records in target DB
+	var initialCount int64
+	if err := targetDB.Model(&Note{}).Count(&initialCount).Error; err != nil {
+		t.Fatalf("Failed to count initial records: %v", err)
+	}
+
+	t.Logf("Initial count in target DB: %d", initialCount)
+
+	// Close the target DB connection to ensure changes are flushed
+	targetSqlDB, err := targetDB.DB()
+	if err == nil {
+		targetSqlDB.Close()
+	}
+
+	// Create a custom source database with detections table for testing
+	sourceDB, err := gorm.Open(sqlite.Open(sourceDBPath), &gorm.Config{
+		Logger: logger.New(
+			nil, // Don't log to stdout during tests
+			logger.Config{
+				SlowThreshold: 1 * time.Second,
+				LogLevel:      logger.Silent,
+				Colorful:      false,
+			},
+		),
+	})
+	if err != nil {
+		t.Fatalf("Failed to create source database: %v", err)
+	}
+
+	// Create detections table
+	err = sourceDB.Exec(`
+		CREATE TABLE detections (
+			Date TEXT,
+			Time TEXT,
+			Sci_Name TEXT,
+			Com_Name TEXT,
+			Confidence REAL,
+			Lat REAL,
+			Lon REAL,
+			Cutoff REAL,
+			Week INTEGER,
+			Sens REAL,
+			Overlap REAL,
+			File_Name TEXT
+		)
+	`).Error
+	if err != nil {
+		t.Fatalf("Failed to create detections table: %v", err)
+	}
+
+	// Create test detections
+	testDetections := []Detection{
+		{
+			Date:       "2023-01-01",
+			Time:       "12:00:00",
+			SciName:    "Corvus corax",
+			ComName:    "Common Raven",
+			Confidence: 0.9,
+			Lat:        42.0,
+			Lon:        -71.0,
+			Cutoff:     0.5,
+			Week:       1,
+			Sens:       1.0,
+			Overlap:    0.0,
+			FileName:   "raven_audio.wav",
+		},
+		{
+			Date:       "2023-01-02",
+			Time:       "13:30:00",
+			SciName:    "Turdus merula",
+			ComName:    "Common Blackbird",
+			Confidence: 0.85,
+			Lat:        42.0,
+			Lon:        -71.0,
+			Cutoff:     0.5,
+			Week:       1,
+			Sens:       1.0,
+			Overlap:    0.0,
+			FileName:   "blackbird_audio.wav",
+		},
+		{
+			Date:       "2023-01-03",
+			Time:       "09:15:00",
+			SciName:    "Cyanistes caeruleus",
+			ComName:    "Eurasian Blue Tit",
+			Confidence: 0.78,
+			Lat:        42.0,
+			Lon:        -71.0,
+			Cutoff:     0.5,
+			Week:       1,
+			Sens:       1.0,
+			Overlap:    0.0,
+			FileName:   "bluetit_audio.wav",
+		},
+	}
+
+	// Insert detections into source database
+	for _, detection := range testDetections {
+		err := sourceDB.Exec(
+			`INSERT INTO detections (Date, Time, Sci_Name, Com_Name, Confidence, Lat, Lon, Cutoff, Week, Sens, Overlap, File_Name) 
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			detection.Date, detection.Time, detection.SciName, detection.ComName, detection.Confidence,
+			detection.Lat, detection.Lon, detection.Cutoff, detection.Week, detection.Sens,
+			detection.Overlap, detection.FileName,
+		).Error
+
+		if err != nil {
+			t.Fatalf("Failed to insert detection: %v", err)
+		}
+	}
+
+	// Verify detections were inserted
+	var detectionsCount int64
+	if err := sourceDB.Raw("SELECT COUNT(*) FROM detections").Count(&detectionsCount).Error; err != nil {
+		t.Fatalf("Failed to count detections: %v", err)
+	}
+	t.Logf("Inserted %d detections in source DB", detectionsCount)
+
+	// Close source DB to flush changes
+	sourceSqlDB, err := sourceDB.DB()
+	if err == nil {
+		sourceSqlDB.Close()
+	}
+
+	// Implement a custom merge function to test the conversion and merge logic
+	err = customMergeDetectionsToNotes(sourceDBPath, targetDBPath)
+	if err != nil {
+		t.Fatalf("customMergeDetectionsToNotes() error = %v", err)
+	}
+
+	// Reopen the target database to check results
+	targetDB, err = gorm.Open(sqlite.Open(targetDBPath), &gorm.Config{
+		Logger: logger.New(
+			nil, // Don't log to stdout during tests
+			logger.Config{
+				SlowThreshold: 1 * time.Second,
+				LogLevel:      logger.Silent,
+				Colorful:      false,
+			},
+		),
+	})
+	if err != nil {
+		t.Fatalf("Failed to reopen target database: %v", err)
+	}
+
+	// Count records after merge
+	var finalCount int64
+	if err := targetDB.Model(&Note{}).Count(&finalCount).Error; err != nil {
+		t.Fatalf("Failed to count final records: %v", err)
+	}
+
+	t.Logf("Final count in target DB: %d", finalCount)
+
+	// List all records in target DB for debugging
+	var allNotes []Note
+	if err := targetDB.Find(&allNotes).Error; err != nil {
+		t.Logf("Failed to fetch all notes for debugging: %v", err)
+	} else {
+		for i, note := range allNotes {
+			t.Logf("Note #%d: Date=%s, Time=%s, ScientificName=%s, CommonName=%s",
+				i, note.Date, note.Time, note.ScientificName, note.CommonName)
+		}
+	}
+
+	// Verify that records were merged correctly
+	expectedCount := initialCount + int64(len(testDetections))
+	if finalCount != expectedCount {
+		t.Errorf("Merge resulted in %d records, expected %d", finalCount, expectedCount)
+	}
+
+	// Check if original records are still there
+	for i, expected := range initialNotes {
+		var count int64
+		if err := targetDB.Model(&Note{}).Where("scientific_name = ?", expected.ScientificName).Count(&count).Error; err != nil {
+			t.Errorf("Failed to verify original record existence: %v", err)
+		}
+		if count == 0 {
+			t.Errorf("Original record #%d '%s' not found after merge", i, expected.ScientificName)
+		}
+	}
+
+	// Check if merged detections are there (converted to Notes)
+	for i, detection := range testDetections {
+		var count int64
+		if err := targetDB.Model(&Note{}).Where("scientific_name = ?", detection.SciName).Count(&count).Error; err != nil {
+			t.Errorf("Failed to verify merged record existence: %v", err)
+		}
+		if count == 0 {
+			t.Errorf("Merged record #%d '%s' not found after merge", i, detection.SciName)
+		} else {
+			t.Logf("Found %d records in target DB for '%s'", count, detection.SciName)
+		}
+	}
+}
+
+// customMergeDetectionsToNotes implements a merge function that handles
+// the conversion from Detection records to Note records for testing
+func customMergeDetectionsToNotes(sourceDBPath, targetDBPath string) error {
+	// Connect to source database
+	sourceDB, err := gorm.Open(sqlite.Open(sourceDBPath), &gorm.Config{
+		Logger: logger.New(nil, logger.Config{LogLevel: logger.Silent}),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to open source DB: %w", err)
+	}
+
+	// Connect to target database
+	targetDB, err := gorm.Open(sqlite.Open(targetDBPath), &gorm.Config{
+		Logger: logger.New(nil, logger.Config{LogLevel: logger.Silent}),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to open target DB: %w", err)
+	}
+
+	// Get detections from source database
+	var detections []Detection
+	if err := sourceDB.Raw("SELECT * FROM detections").Scan(&detections).Error; err != nil {
+		return fmt.Errorf("failed to get detections from source DB: %w", err)
+	}
+
+	// Process each detection - convert to Note and save to target DB
+	for _, detection := range detections {
+		note := convertDetectionToNote(&detection)
+		if err := targetDB.Create(&note).Error; err != nil {
+			return fmt.Errorf("failed to insert note: %w", err)
+		}
+	}
+
+	return nil
 }

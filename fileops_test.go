@@ -4,8 +4,13 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func TestGenerateClipName(t *testing.T) {
@@ -369,4 +374,158 @@ func TestPerformFileOperation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandleFileTransferWithRealData(t *testing.T) {
+	t.Parallel()
+
+	// Connect to the birds.db database
+	db, err := gorm.Open(sqlite.Open("birds.db"), &gorm.Config{
+		Logger: logger.New(
+			nil, // Don't log to stdout during tests
+			logger.Config{
+				SlowThreshold: 1 * time.Second,
+				LogLevel:      logger.Silent,
+				Colorful:      false,
+			},
+		),
+	})
+	if err != nil {
+		t.Fatalf("Failed to connect to birds.db: %v", err)
+	}
+
+	// Get a sample of detections from the database
+	var detections []Detection
+	err = db.Limit(5).Find(&detections).Error
+	if err != nil {
+		t.Fatalf("Failed to fetch detections from birds.db: %v", err)
+	}
+
+	if len(detections) == 0 {
+		t.Fatalf("No detections found in birds.db")
+	}
+
+	// Process detections to fix date format issues
+	for i := range detections {
+		// The date in birds.db is in a combined format, we need to extract just the date part
+		if strings.Contains(detections[i].Date, "T") {
+			parts := strings.Split(detections[i].Date, "T")
+			if len(parts) > 0 {
+				detections[i].Date = parts[0]
+			}
+		}
+
+		t.Logf("Detection #%d after date cleanup: Date=%s, Time=%s",
+			i, detections[i].Date, detections[i].Time)
+	}
+
+	// Create a mock filesystem
+	mockFS := NewMockFS()
+
+	// Setup source and target root directories
+	sourceRoot := "/source"
+	targetRoot := "/target"
+
+	// Create mock audio files for each detection
+	for i, detection := range detections {
+		// In birds.db, the original filenames are stored in File_Name field
+		if detection.FileName == "" {
+			t.Logf("Detection #%d has no filename, skipping", i)
+			continue
+		}
+
+		// Create the directory structure in mockFS
+		sourceDir := filepath.Join(sourceRoot, "Extracted", "By_Date", detection.Date, detection.ComName)
+		sourcePath := filepath.Join(sourceDir, detection.FileName)
+
+		// Create directory and empty file (0 bytes as per requirements)
+		mockFS.MkdirAll(sourceDir, 0o755)
+		mockFS.WriteFile(sourcePath, []byte{}, 0o644)
+
+		t.Logf("Created mock file: %s", sourcePath)
+	}
+
+	// Test CopyFile operation with each detection
+	t.Run("CopyFile with real data", func(t *testing.T) {
+		for i, detection := range detections {
+			if detection.FileName == "" {
+				continue
+			}
+
+			handleFileTransferWithFS(&detection, sourceRoot, targetRoot, CopyFile, mockFS)
+
+			// Generate expected target path
+			expectedClipName := GenerateClipName(&detection)
+
+			// Manual date parsing using string manipulation
+			dateParts := strings.Split(detection.Date, "-")
+			if len(dateParts) != 3 {
+				t.Logf("Detection #%d: Invalid date format: %s, skipping verification", i, detection.Date)
+				continue
+			}
+			year := dateParts[0]
+			month := dateParts[1]
+
+			expectedTargetPath := filepath.Join(targetRoot, year, month, expectedClipName)
+			t.Logf("Checking for target file: %s", expectedTargetPath)
+
+			// Verify the file was copied
+			if !mockFS.FileExists(expectedTargetPath) {
+				t.Errorf("Detection #%d: File was not copied to expected path: %s", i, expectedTargetPath)
+			}
+		}
+	})
+
+	// Test MoveFile operation with each detection
+	t.Run("MoveFile with real data", func(t *testing.T) {
+		// We need to recreate the source files since they were moved in the previous test
+		for _, detection := range detections {
+			if detection.FileName == "" {
+				continue
+			}
+
+			// Recreate the source file
+			sourceDir := filepath.Join(sourceRoot, "Extracted", "By_Date", detection.Date, detection.ComName)
+			sourcePath := filepath.Join(sourceDir, detection.FileName)
+			mockFS.MkdirAll(sourceDir, 0o755)
+			mockFS.WriteFile(sourcePath, []byte{}, 0o644)
+		}
+
+		// Now test the move operation
+		for i, detection := range detections {
+			if detection.FileName == "" {
+				continue
+			}
+
+			// Get source path
+			sourcePath := filepath.Join(sourceRoot, "Extracted", "By_Date", detection.Date, detection.ComName, detection.FileName)
+
+			handleFileTransferWithFS(&detection, sourceRoot, targetRoot, MoveFile, mockFS)
+
+			// Generate expected target path
+			expectedClipName := GenerateClipName(&detection)
+
+			// Manual date parsing using string manipulation
+			dateParts := strings.Split(detection.Date, "-")
+			if len(dateParts) != 3 {
+				t.Logf("Detection #%d: Invalid date format: %s, skipping verification", i, detection.Date)
+				continue
+			}
+			year := dateParts[0]
+			month := dateParts[1]
+
+			expectedTargetPath := filepath.Join(targetRoot, year, month, expectedClipName)
+			t.Logf("Checking for target file: %s", expectedTargetPath)
+
+			// Verify the file was moved
+			if !mockFS.FileExists(expectedTargetPath) {
+				t.Errorf("Detection #%d: File was not moved to expected path: %s", i, expectedTargetPath)
+			}
+
+			// Verify the source file no longer exists
+			if mockFS.FileExists(sourcePath) {
+				t.Errorf("Detection #%d: Source file still exists after move: %s", i, sourcePath)
+			}
+		}
+	})
 }

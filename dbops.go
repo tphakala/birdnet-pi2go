@@ -280,46 +280,61 @@ func formulateQuery(lastNote *Note) (whereClause string, params []any) {
 	return "", nil
 }
 
-// MergeDatabases merges notes from sourceDB into targetDB.
+// MergeDatabases merges data from sourceDB into targetDB.
+// It can handle both source databases with Notes tables and Detections tables.
 func MergeDatabases(sourceDBPath, targetDBPath string) error {
 	// Check if source database file exists
 	if _, err := os.Stat(sourceDBPath); os.IsNotExist(err) {
 		return fmt.Errorf("source database file does not exist: %s", sourceDBPath)
 	}
 
-	// Connect to the source database.
+	// Connect to the source database
 	sourceDB := initializeAndMigrateTargetDB(sourceDBPath, createGormLogger())
 
-	// Verify we can query the source database (it must be a valid SQLite database with Notes table)
-	var count int64
-	if err := sourceDB.Model(&Note{}).Count(&count).Error; err != nil {
-		return fmt.Errorf("failed to access source database: %w", err)
-	}
-
+	// Connect to the target database
 	targetDB := initializeAndMigrateTargetDB(targetDBPath, createGormLogger())
 
-	// Determine the total number of notes in the source database.
-	var totalNotes int64
-	if err := sourceDB.Model(&Note{}).Count(&totalNotes).Error; err != nil {
-		return fmt.Errorf("failed to count notes in source database: %w", err)
+	// First try to access the source database as a Notes database
+	var notesCount int64
+	hasNotesTable := true
+	if err := sourceDB.Model(&Note{}).Count(&notesCount).Error; err != nil {
+		// If there's an error accessing Notes table, it might be a Detections table
+		hasNotesTable = false
 	}
 
-	// Define the batch size.
+	// If source has Notes table, process it as Notes
+	if hasNotesTable {
+		return mergeNotes(sourceDB, targetDB, notesCount)
+	}
+
+	// Check if it has a Detections table
+	var detectionsCount int64
+	if err := sourceDB.Raw("SELECT COUNT(*) FROM detections").Count(&detectionsCount).Error; err != nil {
+		return fmt.Errorf("source database doesn't have a valid Notes or Detections table: %w", err)
+	}
+
+	// Process Detections table
+	return mergeDetections(sourceDB, targetDB, detectionsCount)
+}
+
+// mergeNotes merges notes from sourceDB into targetDB
+func mergeNotes(sourceDB, targetDB *gorm.DB, totalNotes int64) error {
+	// Define the batch size
 	const batchSize = 1000
-	// Calculate the number of batches needed.
+	// Calculate the number of batches needed
 	numBatches := (totalNotes + batchSize - 1) / batchSize
 
 	for i := int64(0); i < numBatches; i++ {
-		// Retrieve a batch of notes from the source database.
+		// Retrieve a batch of notes from the source database
 		var notes []Note
 		if err := sourceDB.Limit(batchSize).Offset(int(i * batchSize)).Find(&notes).Error; err != nil {
 			return fmt.Errorf("failed to retrieve batch of notes: %w", err)
 		}
 
-		// print progres
-		fmt.Printf("Processing batch %d of %d\n", i+1, numBatches)
+		// Print progress
+		fmt.Printf("Processing notes batch %d of %d\n", i+1, numBatches)
 
-		// Insert each note in the batch into the target database without the ID field.
+		// Insert each note in the batch into the target database without the ID field
 		for i := range notes {
 			newNote := Note{
 				Date:           notes[i].Date,
@@ -337,12 +352,42 @@ func MergeDatabases(sourceDBPath, targetDBPath string) error {
 
 			if err := targetDB.Create(&newNote).Error; err != nil {
 				log.Printf("Error inserting note: %v", err)
-
-				continue // Adjust error handling as needed.
+				continue // Adjust error handling as needed
 			}
 		}
 	}
 
 	log.Println("Database merge completed successfully with batching.")
+	return nil
+}
+
+// mergeDetections merges detections from sourceDB into targetDB, converting them to Notes
+func mergeDetections(sourceDB, targetDB *gorm.DB, totalDetections int64) error {
+	// Define the batch size
+	const batchSize = 1000
+	// Calculate the number of batches needed
+	numBatches := (totalDetections + batchSize - 1) / batchSize
+
+	for i := int64(0); i < numBatches; i++ {
+		// Retrieve a batch of detections from the source database
+		var detections []Detection
+		if err := sourceDB.Raw("SELECT * FROM detections LIMIT ? OFFSET ?", batchSize, i*batchSize).Scan(&detections).Error; err != nil {
+			return fmt.Errorf("failed to retrieve batch of detections: %w", err)
+		}
+
+		// Print progress
+		fmt.Printf("Processing detections batch %d of %d\n", i+1, numBatches)
+
+		// Convert and insert each detection into the target database
+		for j := range detections {
+			note := convertDetectionToNote(&detections[j])
+			if err := targetDB.Create(&note).Error; err != nil {
+				log.Printf("Error inserting converted detection: %v", err)
+				continue // Adjust error handling as needed
+			}
+		}
+	}
+
+	log.Println("Database merge (detections to notes) completed successfully with batching.")
 	return nil
 }
