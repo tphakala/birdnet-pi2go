@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
@@ -379,24 +377,19 @@ func TestPerformFileOperation(t *testing.T) {
 func TestHandleFileTransferWithRealData(t *testing.T) {
 	t.Parallel()
 
-	// Connect to the birds.db database
-	db, err := gorm.Open(sqlite.Open("birds.db"), &gorm.Config{
-		Logger: logger.New(
-			nil, // Don't log to stdout during tests
-			logger.Config{
-				SlowThreshold: 1 * time.Second,
-				LogLevel:      logger.Silent,
-				Colorful:      false,
-			},
-		),
-	})
-	if err != nil {
-		t.Fatalf("Failed to connect to birds.db: %v", err)
-	}
+	// Connect to the birds.db database using our read-only method
+	db := initializeAndMigrateSourceDB("birds.db", logger.New(
+		nil, // Don't log to stdout during tests
+		logger.Config{
+			SlowThreshold: 1 * time.Second,
+			LogLevel:      logger.Silent,
+			Colorful:      false,
+		},
+	))
 
 	// Get a sample of detections from the database
 	var detections []Detection
-	err = db.Limit(5).Find(&detections).Error
+	err := db.Limit(5).Find(&detections).Error
 	if err != nil {
 		t.Fatalf("Failed to fetch detections from birds.db: %v", err)
 	}

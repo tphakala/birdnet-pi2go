@@ -1,26 +1,27 @@
-# BirdNET-Pi2Go
+# 🐦 BirdNET-Pi2Go
 
-## Overview
-BirdNET-Pi2Go is a data migration tool designed to facilitate the conversion of BirdNET-Pi database contents and audio files to the BirdNET-Go data model. This utility ensures seamless transition between the two models by providing functionalities for database conversion and audio file transfer.
+## 🌟 Overview
+BirdNET-Pi2Go is a data migration tool designed to facilitate the conversion of BirdNET-Pi database contents and audio files to the BirdNET-Go data model. This utility ensures seamless transition between the two systems while maintaining your valuable bird detection data.
 
-## Features
+## ✨ Features
 
-- Database Conversion: Converts BirdNET-Pi SQLite database to BirdNET-Go format.
-- Audio File Transfer: Supports copying or moving BirdNET-Pi audio files to BirdNET-Go directory structure.
-- Flexible Operation Modes: Allows users to choose between copying or moving audio files based on their needs.
-- Disk Space Check: Verifies adequate disk space is available before performing copy operations.
-- Skip Audio Transfer: Option to skip audio file transfer and only perform database migration.
+- 🔄 **Database Conversion**: Migrates BirdNET-Pi SQLite database to BirdNET-Go format
+- 📁 **Audio File Transfer**: Supports copying or moving audio recordings to BirdNET-Go directory structure
+- 🔀 **Flexible Operations**: Choose between copying files (preserving originals) or moving files (saving space)
+- 💾 **Disk Space Verification**: Automatically checks for sufficient storage before starting transfers
+- ⏩ **Skip Audio Option**: Option to migrate database only, without transferring audio files
+- 🔄 **Merge Support**: Ability to merge existing BirdNET-Go database with migrated data
 
-## Requirements
+## 📋 Requirements
 
-Go 1.21 or newer programming language environment for building the tool.
-Access to the file system containing BirdNET-Pi and BirdNET-Go data.
+- 🖥️ Go 1.21 or newer for building from source
+- 📂 Access to BirdNET-Pi and BirdNET-Go file systems
 
-## Usage
+## 🚀 Getting Started
 
-### Building
+### 🔨 Building
 
-To build BirdNET-Pi2Go from source, clone the repository and use the Go build command:
+To build BirdNET-Pi2Go from source:
 
 ```bash
 git clone https://github.com/tphakala/birdnet-pi2go.git
@@ -28,35 +29,60 @@ cd birdnet-pi2go
 go build
 ```
 
-### Running
+### 📝 Usage Guide
 
-After building, you can run BirdNET-Pi2Go with various flags to customize the migration process:
-
-Target database should be a non-existing database, sqlite database will be created during migration.
+After building, run BirdNET-Pi2Go with various flags to customize your migration:
 
 ```bash
 ./birdnet-pi2go -source-db <path_to_birdnet_pi_db> -target-db <path_to_birdnet_go_db> -source-dir <path_to_birdnet_pi_audio_files> -target-dir <path_to_birdnet_go_audio_files> -operation <copy|move> -skip-audio-transfer <true|false>
 ```
 
-#### Flags
+#### 🎛️ Command Options
 
-- source-db: Path to the BirdNET-Pi SQLite database.
-- target-db: Path to the BirdNET-Go SQLite database.
-- source-dir: Path to BirdNET-Pi BirdSongs directory
-- target-dir: Path to BirdNET-Go clips directory
-- operation: Operation to perform on audio files (copy or move).
-- skip-audio-transfer: Skip transferring audio files and only perform database migration (true/false).
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-source-db` | Path to BirdNET-Pi SQLite database | `birds.db` |
+| `-target-db` | Path to BirdNET-Go SQLite database (will be created) | `birdnet.db` |
+| `-source-dir` | Path to BirdNET-Pi BirdSongs directory | (required for file transfer) |
+| `-target-dir` | Path to BirdNET-Go clips directory | `clips` |
+| `-operation` | File transfer mode: `copy` or `move` | `copy` |
+| `-skip-audio-transfer` | Skip audio file transfer (`true` or `false`) | `false` |
 
-### Example
+> ⚠️ **Note**: Target database should not exist - it will be created during migration.
 
+### 🧪 Examples
+
+#### Basic migration with file copying:
 ```bash
-./birdnet-pi2go -source-db birds.db -target-db birdnet.db -source-dir ~birdnetpi/BirdSongs -target-dir clips -operation copy
+./birdnet-pi2go -source-db birds.db -target-db birdnet.db -source-dir ~/birdnetpi/BirdSongs -target-dir clips -operation copy
 ```
 
-## Disclaimer
+#### Migrate database only (no audio files):
+```bash
+./birdnet-pi2go -source-db birds.db -target-db birdnet.db -skip-audio-transfer true
+```
 
-This tool is provided 'AS IS', without warranty of any kind. Please ensure you have backed up your data before using this tool. The developers are not responsible for any loss of data.
+#### Move files instead of copying (saves disk space):
+```bash
+./birdnet-pi2go -source-db birds.db -target-db birdnet.db -source-dir ~/birdnetpi/BirdSongs -target-dir clips -operation move
+```
 
-## Contributing
+#### Merge existing databases:
+```bash
+./birdnet-pi2go -source-db birds.db -target-db birdnet.db -operation merge
+```
 
-Contributions to BirdNET-Pi2Go are welcome. Please feel free to fork the repository, make your changes, and submit a pull request.
+## 📊 Data Handling
+
+BirdNET-Pi2Go carefully preserves your detection data while converting between formats:
+- 🔍 Detection records are mapped to BirdNET-Go's Note structure
+- 🔊 Audio filenames are standardized according to BirdNET-Go conventions
+- 🗂️ File organization follows BirdNET-Go's year/month directory structure
+
+## ⚠️ Disclaimer
+
+This tool is provided 'AS IS', without warranty of any kind. **Please ensure you have backed up your data before using this tool**. The developers are not responsible for any loss of data.
+
+## 📜 License
+
+MIT

@@ -63,14 +63,12 @@ func convertAndTransferData(sourceDBPath, targetDBPath, sourceFilesDir, targetFi
 		return
 	}
 
-	sourceDB, err := gorm.Open(sqlite.Open(sourceDBPath), &gorm.Config{Logger: newLogger})
-	if err != nil {
-		log.Fatalf("source db open: %v", err)
-	}
+	// Connect to source database in read-only mode
+	sourceDB := initializeAndMigrateSourceDB(sourceDBPath, newLogger)
 
 	// Check if detections table exists
 	var count int64
-	err = sourceDB.Raw("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='detections'").Count(&count).Error
+	err := sourceDB.Raw("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='detections'").Count(&count).Error
 	if err != nil || count == 0 {
 		log.Printf("detections table not found in source database: %s", sourceDBPath)
 		return
@@ -280,6 +278,30 @@ func formulateQuery(lastNote *Note) (whereClause string, params []any) {
 	return "", nil
 }
 
+// initializeAndMigrateSourceDB prepares the source database for read-only operations.
+func initializeAndMigrateSourceDB(sourceDBPath string, newLogger logger.Interface) *gorm.DB {
+	// Open the source database in read-only mode to prevent modifications
+	sourceDB, err := gorm.Open(sqlite.Open(sourceDBPath+"?mode=ro"), &gorm.Config{Logger: newLogger})
+	if err != nil {
+		log.Fatalf("source db open: %v", err)
+	}
+
+	// Configure SQLite for optimal read performance
+	if err := sourceDB.Exec("PRAGMA journal_mode = OFF").Error; err != nil {
+		log.Printf("failed to set journal mode in source SQLite: %v", err)
+	}
+
+	if err := sourceDB.Exec("PRAGMA synchronous = OFF").Error; err != nil {
+		log.Printf("failed to set synchronous mode in source SQLite: %v", err)
+	}
+
+	if err := sourceDB.Exec("PRAGMA cache_size = -32000").Error; err != nil {
+		log.Printf("failed to set cache size in source SQLite: %v", err)
+	}
+
+	return sourceDB
+}
+
 // MergeDatabases merges data from sourceDB into targetDB.
 // It can handle both source databases with Notes tables and Detections tables.
 func MergeDatabases(sourceDBPath, targetDBPath string) error {
@@ -293,8 +315,8 @@ func MergeDatabases(sourceDBPath, targetDBPath string) error {
 		return fmt.Errorf("source database file does not exist: %s", sourceDBPath)
 	}
 
-	// Connect to the source database
-	sourceDB := initializeAndMigrateTargetDB(sourceDBPath, createGormLogger())
+	// Connect to the source database in read-only mode
+	sourceDB := initializeAndMigrateSourceDB(sourceDBPath, createGormLogger())
 
 	// Connect to the target database
 	targetDB := initializeAndMigrateTargetDB(targetDBPath, createGormLogger())

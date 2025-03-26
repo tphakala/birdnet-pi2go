@@ -835,19 +835,14 @@ func TestMergeWithRealBirdsDB(t *testing.T) {
 	}
 
 	// Get a count of records in birds.db for verification later
-	birdsDB, err := gorm.Open(sqlite.Open("birds.db"), &gorm.Config{
-		Logger: logger.New(
-			nil,
-			logger.Config{
-				SlowThreshold: 1 * time.Second,
-				LogLevel:      logger.Silent,
-				Colorful:      false,
-			},
-		),
-	})
-	if err != nil {
-		t.Fatalf("Failed to open birds.db: %v", err)
-	}
+	birdsDB := initializeAndMigrateSourceDB("birds.db", logger.New(
+		nil,
+		logger.Config{
+			SlowThreshold: 1 * time.Second,
+			LogLevel:      logger.Silent,
+			Colorful:      false,
+		},
+	))
 
 	var detectionsCount int64
 	if err := birdsDB.Raw("SELECT COUNT(*) FROM detections").Count(&detectionsCount).Error; err != nil {
@@ -950,19 +945,14 @@ func TestBatchSizePerformance(t *testing.T) {
 	batchSizes := []int{100, 500, 1000, 5000, 10000}
 
 	// Get a count of records in birds.db for verification later
-	birdsDB, err := gorm.Open(sqlite.Open("birds.db"), &gorm.Config{
-		Logger: logger.New(
-			nil,
-			logger.Config{
-				SlowThreshold: 1 * time.Second,
-				LogLevel:      logger.Silent,
-				Colorful:      false,
-			},
-		),
-	})
-	if err != nil {
-		t.Fatalf("Failed to open birds.db: %v", err)
-	}
+	birdsDB := initializeAndMigrateSourceDB("birds.db", logger.New(
+		nil,
+		logger.Config{
+			SlowThreshold: 1 * time.Second,
+			LogLevel:      logger.Silent,
+			Colorful:      false,
+		},
+	))
 
 	var detectionsCount int64
 	if err := birdsDB.Raw("SELECT COUNT(*) FROM detections").Count(&detectionsCount).Error; err != nil {
@@ -1016,8 +1006,8 @@ func TestBatchSizePerformance(t *testing.T) {
 
 		// Create a custom merge function with the specific batch size
 		mergeFn := func() error {
-			// Connect to the source database
-			sourceDB := initializeAndMigrateTargetDB("birds.db", createGormLogger())
+			// Connect to the source database in read-only mode
+			sourceDB := initializeAndMigrateSourceDB("birds.db", createGormLogger())
 
 			// Connect to the target database
 			targetDB := initializeAndMigrateTargetDB(targetDBPath, createGormLogger())
