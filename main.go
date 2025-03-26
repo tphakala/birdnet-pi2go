@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 )
 
 // FileOperationType defines the type of operation to perform on the audio files.
@@ -145,14 +144,4 @@ func checkDiskSpace(sourceDir, targetDir string) (bool, error) {
 	}
 
 	return uint64(sourceSize) <= freeSpace, nil
-}
-
-// getFreeSpace returns the available space in bytes for the given path
-func getFreeSpace(path string) (uint64, error) {
-	var stat syscall.Statfs_t
-	err := syscall.Statfs(path, &stat)
-	if err != nil {
-		return 0, err
-	}
-	return stat.Bavail * uint64(stat.Bsize), nil
 }
