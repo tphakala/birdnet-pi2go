@@ -1,11 +1,10 @@
 module github.com/tphakala/birdnet-pi2go
 
 go 1.22.1
-
 require (
 	github.com/glebarez/sqlite v1.11.0
 	golang.org/x/sys v0.24.0
-	gorm.io/gorm v1.25.11
+	gorm.io/gorm v1.25.12
 )
 
 require (
