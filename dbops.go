@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -232,7 +233,10 @@ func convertDetectionToNote(detection *Detection) Note {
 		detection.Date = parsedDate.Format("2006-01-02")
 	}
 
-	clipName := GenerateClipName(detection)
+	// Construct the path for the clip
+	year := parsedDate.Format("2006")
+	month := parsedDate.Format("01")
+	clipName := filepath.Join(year, month, GenerateClipName(detection))
 
 	return Note{
 		Date:           detection.Date,

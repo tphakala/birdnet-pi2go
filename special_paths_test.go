@@ -104,8 +104,8 @@ func TestFilePathsWithSpecialCharacters(t *testing.T) {
 			handleFileTransferWithFS(detection, sourceDir, targetDir, CopyFile, mockFS)
 
 			// Create expected target path
-			clipName := GenerateClipName(detection)
-			expectedTargetPath := filepath.Join(targetDir, "2023", "01", clipName)
+			clipName := filepath.Join("2023", "01", GenerateClipName(detection))
+			expectedTargetPath := filepath.Join(targetDir, clipName)
 
 			// Verify the file was copied successfully
 			if !mockFS.FileExists(expectedTargetPath) {
