@@ -223,7 +223,7 @@ func GenerateClipName(detection *Detection) string {
 
 	// Generate the new filename with the formatted date, time, and confidence level.
 	confidencePercentage := fmt.Sprintf("%dp", int(detection.Confidence*100))
-	newFileName := fmt.Sprintf("%s_%s_%s.wav", sciNameFormatted, confidencePercentage, formattedDateTime)
+	newFileName := fmt.Sprintf("%s_%s_%s%s", sciNameFormatted, confidencePercentage, formattedDateTime, filepath.Ext(detection.FileName))
 
 	return newFileName
 }

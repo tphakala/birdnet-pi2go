@@ -63,12 +63,12 @@ func TestFilePathsWithSpecialCharacters(t *testing.T) {
 			fileName:  "recording with spaces.wav",
 			expectErr: false,
 		},
-		// It also strips some characters
+		// It also strips some characters and uses mp3s
 		{
 			name:      "Spaces in names changed to underscores",
 			birdName:  "Anna's_Hummingbird",
 			comName:   "Annas_Hummingbird",
-			fileName:  "recording with spaces.wav",
+			fileName:  "recording with spaces.mp3",
 			expectErr: false,
 		},
 	}
