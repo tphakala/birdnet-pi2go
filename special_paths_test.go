@@ -15,6 +15,7 @@ func TestFilePathsWithSpecialCharacters(t *testing.T) {
 	testCases := []struct {
 		name      string
 		birdName  string
+		comName   string
 		fileName  string
 		expectErr bool
 	}{
@@ -54,6 +55,22 @@ func TestFilePathsWithSpecialCharacters(t *testing.T) {
 			fileName:  "mixed-recording!@$%^.wav",
 			expectErr: false,
 		},
+		// Looks like Birdnet-pi started adding underscores to common name at some point
+		{
+			name:      "Spaces in names changed to underscores",
+			birdName:  "Test Bird With Spaces",
+			comName:   "Test_Bird_With_Spaces",
+			fileName:  "recording with spaces.wav",
+			expectErr: false,
+		},
+		// It also strips some characters
+		{
+			name:      "Spaces in names changed to underscores",
+			birdName:  "Anna's_Hummingbird",
+			comName:   "Annas_Hummingbird",
+			fileName:  "recording with spaces.wav",
+			expectErr: false,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -68,10 +85,16 @@ func TestFilePathsWithSpecialCharacters(t *testing.T) {
 				FileName:   tc.fileName,
 			}
 
+			// Use tc.ComName override, if it exists
+			comName := tc.comName
+			if comName == "" {
+				comName = tc.birdName
+			}
+
 			// Setup source directories and file
 			sourceDir := "/source/" + tc.name
 			targetDir := "/target/" + tc.name
-			sourcePath := filepath.Join(sourceDir, "Extracted", "By_Date", detection.Date, detection.ComName, detection.FileName)
+			sourcePath := filepath.Join(sourceDir, "Extracted", "By_Date", detection.Date, comName, detection.FileName)
 
 			// Create source directory structure and file
 			mockFS.MkdirAll(filepath.Dir(sourcePath), 0o755)
