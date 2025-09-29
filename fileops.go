@@ -75,8 +75,14 @@ func handleFileTransferWithFS(detection *Detection, sourceFilesDir, targetFilesD
 
 	// Check if the source file exists
 	if !fs.FileExists(sourceFilePath) {
-		log.Printf("Source file not found: %s", sourceFilePath)
-		return
+		// detection.ComName may have had spaces replaced with underscores and apostrophe's removed
+		comNameFormatted := strings.ReplaceAll(detection.ComName, " ", "_")
+		comNameFormatted = strings.ReplaceAll(comNameFormatted, "'", "")
+		sourceFilePath = filepath.Join(sourceFilesDir, "Extracted", "By_Date", detection.Date, comNameFormatted, detection.FileName)
+		if !fs.FileExists(sourceFilePath) {
+			log.Printf("Source file not found: %s", sourceFilePath)
+			return
+		}
 	}
 
 	// Generate a new filename that follows the BIRDNET-Pi naming convention
@@ -217,7 +223,7 @@ func GenerateClipName(detection *Detection) string {
 
 	// Generate the new filename with the formatted date, time, and confidence level.
 	confidencePercentage := fmt.Sprintf("%dp", int(detection.Confidence*100))
-	newFileName := fmt.Sprintf("%s_%s_%s.wav", sciNameFormatted, confidencePercentage, formattedDateTime)
+	newFileName := fmt.Sprintf("%s_%s_%s%s", sciNameFormatted, confidencePercentage, formattedDateTime, filepath.Ext(detection.FileName))
 
 	return newFileName
 }
