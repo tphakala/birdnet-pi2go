@@ -1,4 +1,9 @@
-# 🐦 BirdNET-Pi2Go
+# 🐦 BirdNET-Pi2Go (Deprecated)
+
+> [!WARNING]
+> **This project is deprecated and should no longer be used.**
+> 
+> BirdNET-Go now includes built-in BirdNET-Pi import functionality. You can import your BirdNET-Pi database and audio files directly from the BirdNET-Go web interface by navigating to **System > Import/Export**.
 
 ## 🌟 Overview
 BirdNET-Pi2Go is a data migration tool designed to facilitate the conversion of BirdNET-Pi database contents and audio files to the BirdNET-Go data model. This utility ensures seamless transition between the two systems while maintaining your valuable bird detection data.
