@@ -4,8 +4,12 @@ go 1.24.0
 
 require (
 	github.com/glebarez/sqlite v1.11.0
-	golang.org/x/sys v0.37.0
+	golang.org/x/sys v0.40.0
+<<<<<<< Updated upstream
 	gorm.io/gorm v1.31.0
+=======
+	gorm.io/gorm v1.31.1
+>>>>>>> Stashed changes
 )
 
 require (
